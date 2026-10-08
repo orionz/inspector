@@ -1,0 +1,15 @@
+[package]
+name = "am-inspect"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Structural parser and storage analysis for automerge files"
+
+[dependencies]
+automerge = { workspace = true }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = "0.10"
+hex = "0.4"
+
+[features]
+wasm = ["automerge/wasm"]

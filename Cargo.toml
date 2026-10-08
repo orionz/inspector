@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/core", "crates/app", "tools/corpus"]
+resolver = "2"
+
+[workspace.dependencies]
+automerge = { path = "../automerge/rust/automerge" }
+hexane = { path = "../automerge/rust/hexane" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
