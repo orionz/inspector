@@ -12,7 +12,7 @@ use wasm_bindgen_futures::JsFuture;
 use state::{AppState, Tab};
 
 const SAMPLES: &[(&str, &str)] = &[
-    ("todo-save-plus-incrementals.automerge", "save() + 4 × save_incremental() — doc chunk followed by change chunks"),
+    ("todo-save-plus-incrementals.automerge", "save() then 104 × save_incremental(): bulk imports between runs of single edits"),
     ("text-next-save-plus-incrementals.automerge", "next API: change-set save + incremental change sets"),
     ("text-next-changeset.automerge", "whole document as one change set chunk"),
     ("text-doc.automerge", "collaborative rich text, 3 authors, marks"),

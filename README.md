@@ -12,9 +12,9 @@ in its history. Everything runs locally in the browser.
   on a log scale when sizes differ by more than 8×. Runs of chunks around 1%
   of the file or smaller collapse into thin bands, which expand into a chunk
   list on hover. Exact bytes, share of file, changes and ops appear on hover.
+  Per-type totals sit above the stack.
 - Clicking a chunk opens its detail and shrinks the stack into a band on the
-  left; clicking the band returns to the stack. Per-type totals sit beside
-  the stack.
+  left; clicking the band returns to the stack.
 - For the selected chunk: header facts (actors, heads, deps, seq/time/message,
   change-set fragment prefix counts, checksum), and a byte-layout bar splitting
   the chunk into header, metadata, column metadata, change columns, op

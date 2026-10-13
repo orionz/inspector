@@ -145,6 +145,51 @@ fn save_plus_incrementals(mut doc: AutoCommit, batches: usize) -> Vec<u8> {
     out
 }
 
+/// A large saved todo list followed by incremental saves of very different
+/// sizes: a few bulk edits, each followed by a trickle of single-edit saves.
+fn todo_save_plus_trickle() -> Vec<u8> {
+    const WORDS: &[&str] = &[
+        "apples", "basil", "cheddar", "dates", "espresso", "figs", "garlic", "honey", "iceberg", "jam",
+        "kale", "lemons", "mangoes", "noodles", "oats", "pears", "quinoa", "radish", "saffron", "tofu",
+    ];
+    let mut doc = todo_doc();
+    let items = doc.get(ROOT, "items").unwrap().unwrap().1;
+    let mut minute = 20;
+    let add_item = |doc: &mut AutoCommit| {
+        let at = doc.length(&items);
+        let item = doc.insert_object(&items, at, ObjType::Map).unwrap();
+        let name = format!("{} {} #{at}", WORDS[at % 20], WORDS[(at * 7 + 3) % 20]);
+        doc.put(&item, "text", name.as_str()).unwrap();
+        doc.put(&item, "done", at % 3 == 0).unwrap();
+        doc.put(&item, "qty", (at % 9 + 1) as i64).unwrap();
+        name
+    };
+    for _ in 0..600 {
+        let name = add_item(&mut doc);
+        commit(&mut doc, minute, &format!("add {name}"));
+        minute += 1;
+    }
+    let mut out = doc.save();
+    // save_incremental writes one chunk per change, so each bulk edit is one commit.
+    for (bulk, trickle) in [(120, 14), (40, 30), (80, 6), (25, 50)] {
+        for _ in 0..bulk {
+            add_item(&mut doc);
+        }
+        commit(&mut doc, minute, &format!("import {bulk} items"));
+        minute += 1;
+        out.extend(doc.save_incremental());
+        for t in 0..trickle {
+            let len = doc.length(&items);
+            let item = doc.get(&items, (t * 37) % len).unwrap().unwrap().1;
+            doc.put(&item, "qty", minute).unwrap();
+            commit(&mut doc, minute, "change quantity");
+            minute += 1;
+            out.extend(doc.save_incremental());
+        }
+    }
+    out
+}
+
 fn concat_changes(doc: &mut AutoCommit) -> Vec<u8> {
     doc.get_changes(&[])
         .into_iter()
@@ -168,7 +213,7 @@ fn main() {
     write(
         &dir,
         "todo-save-plus-incrementals.automerge",
-        &save_plus_incrementals(todo_doc(), 4),
+        &todo_save_plus_trickle(),
     );
     write(
         &dir,

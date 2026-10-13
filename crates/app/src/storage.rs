@@ -30,10 +30,6 @@ pub fn StorageTab() -> impl IntoView {
         <TrailingError/>
         <div class="storage" class:open=open>
             <ChunkStack/>
-            <aside class="overview-side">
-                <TypeSummary/>
-                <ScaleNote/>
-            </aside>
             <section class="detail">
                 <ChunkDetail/>
             </section>
@@ -181,6 +177,10 @@ fn ChunkStack() -> impl IntoView {
     };
     view! {
         <div class="stack-wrap">
+            <div class="stack-head">
+                <TypeSummary/>
+                <ScaleNote/>
+            </div>
             <div class="stack">{stack}</div>
             <Show when=move || app.chunk.get().is_some()>
                 <button class="stack-close" title="Back to all chunks"
