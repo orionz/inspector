@@ -63,3 +63,16 @@ pub fn hex_preview(b: &[u8], max: usize) -> String {
     }
     s
 }
+
+/// `n` with thousands separators, e.g. `12,345`.
+pub fn count_exact(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}

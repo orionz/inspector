@@ -13,7 +13,7 @@ use crate::fmt;
 use crate::state::{AppState, Cache, ColumnRef, GroupView, Loaded};
 
 fn with_chunk<R>(app: AppState, f: impl FnOnce(&Rc<Loaded>, &Chunk) -> R) -> Option<R> {
-    let idx = app.chunk.get();
+    let idx = app.chunk.get()?;
     app.file
         .with(|file| file.as_ref().and_then(|l| l.report.chunks.get(idx).map(|c| f(l, c))))
 }
@@ -24,12 +24,15 @@ fn file_key(l: &Rc<Loaded>) -> usize {
 
 #[component]
 pub fn StorageTab() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let open = move || app.chunk.get().is_some();
     view! {
-        <FileMap/>
-        <div class="storage">
-            <aside class="sidebar">
+        <TrailingError/>
+        <div class="storage" class:open=open>
+            <ChunkStack/>
+            <aside class="overview-side">
                 <TypeSummary/>
-                <ChunkList/>
+                <ScaleNote/>
             </aside>
             <section class="detail">
                 <ChunkDetail/>
@@ -38,56 +41,260 @@ pub fn StorageTab() -> impl IntoView {
     }
 }
 
-/// One horizontal bar for the whole file; tiny neighbouring chunks of the
-/// same kind are merged so huge files stay readable.
 #[component]
-fn FileMap() -> impl IntoView {
+fn TrailingError() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    move || {
+        app.file.with(|f| {
+            let (off, e) = f.as_ref()?.report.trailing.clone()?;
+            Some(view! { <div class="error">{format!("Stopped reading at byte {off}: {e}")}</div> })
+        })
+    }
+}
+
+/// Chunks under this share of the file are drawn as thin bands.
+const TINY_SHARE: usize = 100;
+/// Chunks up to this many times the cutoff join an adjacent run of bands.
+const ABSORB_FACTOR: usize = 3;
+const BLOCK_MIN_H: f64 = 26.0;
+const BAND_H: f64 = 4.0;
+const MAX_BANDS: usize = 12;
+/// Size spreads above this ratio switch block heights to a log scale.
+const LINEAR_SPREAD: usize = 8;
+
+enum StackItem {
+    Block { index: usize, height: f64 },
+    Bands { first: usize, last: usize },
+}
+
+impl StackItem {
+    fn height(&self) -> f64 {
+        match self {
+            StackItem::Block { height, .. } => *height,
+            StackItem::Bands { first, last } => BAND_H * (last - first + 1).min(MAX_BANDS) as f64,
+        }
+    }
+}
+
+/// Which chunks are drawn as bands. Chunks a little over the cutoff are
+/// pulled into neighbouring bands so a run of similar sizes isn't split
+/// into alternating bands and blocks.
+fn tiny_chunks(chunks: &[Chunk], file_len: usize) -> Vec<bool> {
+    let mut tiny: Vec<bool> = chunks.iter().map(|c| c.len() * TINY_SHARE < file_len).collect();
+    let near = |c: &Chunk| c.len() * TINY_SHARE < file_len * ABSORB_FACTOR;
+    for i in (1..chunks.len()).chain((0..chunks.len().saturating_sub(1)).rev()) {
+        let neighbour = (i > 0 && tiny[i - 1]) || tiny.get(i + 1).copied().unwrap_or(false);
+        if !tiny[i] && neighbour && near(&chunks[i]) {
+            tiny[i] = true;
+        }
+    }
+    tiny
+}
+
+struct StackLayout {
+    items: Vec<StackItem>,
+    log: bool,
+}
+
+fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
+    let tiny = tiny_chunks(chunks, file_len);
+    let big = || chunks.iter().zip(&tiny).filter(|(_, t)| !**t).map(|(c, _)| c.len().max(1));
+    let (lo, hi) = big().fold((usize::MAX, 1), |(lo, hi), n| (lo.min(n), hi.max(n)));
+    let n_big = big().count().max(1);
+    let max_h = (1200.0 / n_big as f64).clamp(60.0, 260.0);
+    let log = hi > lo.saturating_mul(LINEAR_SPREAD);
+    let height = |len: usize| {
+        let len = len.max(1) as f64;
+        if log {
+            let t = (len / lo as f64).ln() / (hi as f64 / lo as f64).ln();
+            BLOCK_MIN_H + (max_h - BLOCK_MIN_H) * t
+        } else {
+            (max_h * len / hi as f64).max(BLOCK_MIN_H)
+        }
+    };
+    let mut items: Vec<StackItem> = vec![];
+    for (c, tiny) in chunks.iter().zip(tiny) {
+        if !tiny {
+            items.push(StackItem::Block { index: c.index, height: height(c.len()) });
+            continue;
+        }
+        match items.last_mut() {
+            Some(StackItem::Bands { last, .. }) => *last = c.index,
+            _ => items.push(StackItem::Bands { first: c.index, last: c.index }),
+        }
+    }
+    StackLayout { items, log }
+}
+
+#[component]
+fn ScaleNote() -> impl IntoView {
     let app = expect_context::<AppState>();
     move || {
         app.file.with(|f| {
             let f = f.as_ref()?;
-            let total = f.report.len.max(1);
-            let mut segs: Vec<(ChunkKind, usize, usize, usize)> = vec![];
-            for c in &f.report.chunks {
-                let small = c.len() * 400 < total;
-                match segs.last_mut() {
-                    Some(last) if small && last.0 == c.kind && last.3 * 400 < total => {
-                        last.2 = c.index;
-                        last.3 += c.len();
-                    }
-                    _ => segs.push((c.kind, c.index, c.index, c.len())),
-                }
-            }
-            let trailing = f.report.trailing.clone();
+            let log = stack_layout(&f.report.chunks, f.report.len.max(1)).log;
             Some(view! {
-                <div class="filemap">
-                    {segs
-                        .into_iter()
-                        .map(|(kind, first, last, len)| {
-                            let title = if first == last {
-                                format!("#{first} {} · {}", kind.label(), fmt::bytes(len))
-                            } else {
-                                format!("#{first}–#{last} {} × {} · {}", kind.label(), last - first + 1, fmt::bytes(len))
-                            };
-                            view! {
-                                <div class=format!("seg k-{}", kind.key())
-                                    class:sel=move || (first..=last).contains(&app.chunk.get())
-                                    style:flex-grow=len.to_string()
-                                    title=title
-                                    on:click=move |_| { app.chunk.set(first); app.column.set(None); }></div>
-                            }
-                        })
-                        .collect_view()}
-                    {trailing.map(|(off, _)| {
-                        let len = total - off;
-                        view! { <div class="seg k-unknown" style:flex-grow=len.to_string() title="unparsed trailing bytes"></div> }
-                    })}
-                </div>
-                {f.report.trailing.as_ref().map(|(off, e)| view! {
-                    <div class="error">{format!("Stopped reading at byte {off}: {e}")}</div>
-                })}
+                <p class="dim small scale-note">
+                    {if log { "Block heights use a log scale of chunk size." } else { "Block heights are proportional to chunk size." }}
+                    " Chunks around 1% of the file or less are drawn as thin bands. Hover for details, click to open."
+                </p>
             })
         })
+    }
+}
+
+fn select_chunk(app: AppState, index: usize) {
+    app.chunk.set(Some(index));
+    app.column.set(None);
+    window().scroll_to_with_x_and_y(0.0, 0.0);
+}
+
+/// The file as a vertical stack of chunks. Once a chunk is open it shrinks
+/// into a band at the left; clicking the band closes the chunk.
+#[component]
+fn ChunkStack() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let stack = move || {
+        app.file.with(|f| {
+            let f = f.as_ref()?;
+            let total = f.report.len.max(1);
+            let layout = stack_layout(&f.report.chunks, total);
+            Some(
+                layout
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        let h = item.height();
+                        match item {
+                            StackItem::Block { index, .. } => {
+                                view! { <ChunkBlock chunk=f.report.chunks[index].clone() file_len=total height=h/> }.into_any()
+                            }
+                            StackItem::Bands { first, last } => {
+                                let chunks = f.report.chunks[first..=last].to_vec();
+                                view! { <ChunkBands chunks=chunks file_len=total height=h/> }.into_any()
+                            }
+                        }
+                    })
+                    .collect_view(),
+            )
+        })
+    };
+    view! {
+        <div class="stack-wrap">
+            <div class="stack">{stack}</div>
+            <Show when=move || app.chunk.get().is_some()>
+                <button class="stack-close" title="Back to all chunks"
+                    on:click=move |_| { app.chunk.set(None); app.column.set(None); }>
+                    <span>"‹"</span>
+                </button>
+            </Show>
+        </div>
+    }
+}
+
+fn chunk_stats(c: &Chunk, file_len: usize) -> String {
+    let mut parts = vec![
+        format!("{} B", fmt::count_exact(c.len())),
+        fmt::pct(c.len(), file_len),
+    ];
+    match &c.facts.change {
+        Some(h) => parts.push(format!("seq {}", h.seq)),
+        None => parts.push(format!("{} changes", fmt::count(c.num_changes()))),
+    }
+    parts.push(format!("{} ops", fmt::count(c.num_ops())));
+    if !c.facts.actors.is_empty() {
+        parts.push(format!("{} actors", c.facts.actors.len()));
+    }
+    if let Some(n) = c.inflated_len {
+        parts.push(format!("inflates to {}", fmt::bytes(n)));
+    }
+    parts.join(" · ")
+}
+
+fn chunk_flag(c: &Chunk) -> Option<impl IntoView> {
+    (!c.checksum_ok || c.error.is_some()).then(|| view! { <span class="bad" title="checksum mismatch or parse error">"!"</span> })
+}
+
+#[component]
+fn ChunkBlock(chunk: Chunk, file_len: usize, height: f64) -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let i = chunk.index;
+    view! {
+        <button class=format!("blk k-{}", chunk.kind.key())
+            class:sel=move || app.chunk.get() == Some(i)
+            style:--h=height.to_string()
+            on:click=move |_| select_chunk(app, i)>
+            <span class="blk-label">
+                <span class="idx">{format!("#{i}")}</span>
+                <span class=format!("chip k-{}", chunk.kind.key())>{chunk.kind.label()}</span>
+                {chunk_flag(&chunk)}
+            </span>
+            <span class="blk-stats">{chunk_stats(&chunk, file_len)}</span>
+        </button>
+    }
+}
+
+const BAND_LIST_PAGE: usize = 200;
+
+/// A run of tiny chunks drawn as a few thin bands, which expands into a
+/// list of the chunks on hover.
+#[component]
+fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let expanded = RwSignal::new(false);
+    let shown = RwSignal::new(BAND_LIST_PAGE);
+    let n = chunks.len();
+    let first = chunks[0].index;
+    let last = chunks[n - 1].index;
+    let bytes: usize = chunks.iter().map(|c| c.len()).sum();
+    let biggest = chunks.iter().map(|c| c.len()).max().unwrap_or(1);
+    let bands: Vec<&'static str> = (0..n.min(MAX_BANDS))
+        .map(|b| chunks[b * n / n.min(MAX_BANDS)].kind.key())
+        .collect();
+    let chunks = std::sync::Arc::new(chunks);
+    let list = move || {
+        expanded.get().then(|| {
+            let limit = shown.get();
+            view! {
+                <div class="bands-panel">
+                    <div class="bands-head dim">
+                        {if n == 1 { format!("chunk #{first}") } else { format!("chunks #{first}–#{last} · {n} chunks") }}
+                        {format!(" · {} B · {}", fmt::count_exact(bytes), fmt::pct(bytes, file_len))}
+                    </div>
+                    {chunks.iter().take(limit).map(|c| {
+                        let i = c.index;
+                        view! {
+                            <button class="band-row" on:click=move |_| { expanded.set(false); select_chunk(app, i); }>
+                                <span class="idx">{format!("#{i}")}</span>
+                                <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
+                                <span class="dim">{chunk_stats(c, file_len)}</span>
+                                {chunk_flag(c)}
+                                <span class=format!("row-bar k-{}", c.kind.key())
+                                    style:width=format!("{}%", fmt::ratio(c.len(), biggest))></span>
+                            </button>
+                        }
+                    }).collect_view()}
+                    {(n > limit).then(|| view! {
+                        <button class="link more" on:click=move |_| shown.update(|s| *s += BAND_LIST_PAGE)>
+                            {format!("show more ({} remaining)", n - limit)}
+                        </button>
+                    })}
+                </div>
+            }
+        })
+    };
+    view! {
+        <div class="bands"
+            class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
+            class:expanded=move || expanded.get()
+            style:--h=height.to_string()
+            on:mouseenter=move |_| if app.chunk.get_untracked().is_none() { expanded.set(true) }
+            on:mouseleave=move |_| { expanded.set(false); shown.set(BAND_LIST_PAGE); }>
+            <div class="band-stripes">
+                {bands.into_iter().map(|k| view! { <i class=format!("k-{k}")></i> }).collect_view()}
+            </div>
+            {list}
+        </div>
     }
 }
 
@@ -125,54 +332,6 @@ fn TypeSummary() -> impl IntoView {
                         }).collect_view()}
                     </tbody>
                 </table>
-            })
-        })
-    }
-}
-
-const LIST_PAGE: usize = 200;
-
-#[component]
-fn ChunkList() -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let shown = RwSignal::new(LIST_PAGE);
-    move || {
-        app.file.with(|f| {
-            let f = f.as_ref()?;
-            let total = f.report.len.max(1);
-            let max = f.report.chunks.iter().map(|c| c.len()).max().unwrap_or(1);
-            let n = f.report.chunks.len();
-            let limit = shown.get();
-            Some(view! {
-                <div class="chunk-list">
-                    {f.report.chunks.iter().take(limit).map(|c| {
-                        let i = c.index;
-                        let w = fmt::ratio(c.len(), max);
-                        let detail = match c.kind {
-                            ChunkKind::Change | ChunkKind::Compressed => c.facts.change.as_ref()
-                                .map(|h| format!("seq {} · {} ops", h.seq, c.num_ops()))
-                                .unwrap_or_default(),
-                            _ => format!("{} ch · {} ops", fmt::count(c.num_changes()), fmt::count(c.num_ops())),
-                        };
-                        view! {
-                            <button class="chunk-row" class:sel=move || app.chunk.get() == i
-                                title=format!("{} of file", fmt::pct(c.len(), total))
-                                on:click=move |_| { app.chunk.set(i); app.column.set(None); }>
-                                <span class="idx">{format!("#{i}")}</span>
-                                <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
-                                <span class="dim detail">{detail}</span>
-                                <span class="num">{fmt::bytes(c.len())}</span>
-                                {(!c.checksum_ok || c.error.is_some()).then(|| view! { <span class="bad">"!"</span> })}
-                                <span class=format!("minibar k-{}", c.kind.key()) style:width=format!("{w}%")></span>
-                            </button>
-                        }
-                    }).collect_view()}
-                    {(n > limit).then(|| view! {
-                        <button class="link more" on:click=move |_| shown.update(|s| *s += LIST_PAGE)>
-                            {format!("show more ({} remaining)", n - limit)}
-                        </button>
-                    })}
-                </div>
             })
         })
     }

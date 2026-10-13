@@ -39,7 +39,8 @@ pub struct AppState {
     pub model: Local<Option<Rc<Result<DocModel, String>>>>,
     pub status: RwSignal<Option<String>>,
     pub tab: RwSignal<Tab>,
-    pub chunk: RwSignal<usize>,
+    /// The chunk whose detail panels are open; `None` shows the chunk stack.
+    pub chunk: RwSignal<Option<usize>>,
     pub column: RwSignal<Option<ColumnRef>>,
     pub group_view: RwSignal<(GroupView, GroupView)>,
     pub step: RwSignal<usize>,
@@ -53,7 +54,7 @@ impl AppState {
             model: RwSignal::new_local(None),
             status: RwSignal::new(None),
             tab: RwSignal::new(Tab::Storage),
-            chunk: RwSignal::new(0),
+            chunk: RwSignal::new(None),
             column: RwSignal::new(None),
             group_view: RwSignal::new((GroupView::Columns, GroupView::Columns)),
             step: RwSignal::new(0),
@@ -79,7 +80,7 @@ impl AppState {
             move || {
                 let report = parse_file(&bytes);
                 self.column.set(None);
-                self.chunk.set(0);
+                self.chunk.set(None);
                 self.group_view
                     .set((GroupView::Columns, GroupView::Columns));
                 self.model.set(None);
