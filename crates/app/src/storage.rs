@@ -53,8 +53,10 @@ const TINY_SHARE: usize = 100;
 /// Chunks up to this many times the cutoff join an adjacent run of bands.
 const ABSORB_FACTOR: usize = 3;
 const BLOCK_MIN_H: f64 = 26.0;
-const BAND_H: f64 = 4.0;
-const MAX_BANDS: usize = 12;
+/// Vertical space per tiny chunk, so the cursor steps through them one by one.
+const BAND_PITCH: f64 = 3.0;
+/// Past this height a band group squeezes its bands below one pitch.
+const MAX_BANDS_H: f64 = 1500.0;
 /// Size spreads above this ratio switch block heights to a log scale.
 const LINEAR_SPREAD: usize = 8;
 
@@ -67,7 +69,10 @@ impl StackItem {
     fn height(&self) -> f64 {
         match self {
             StackItem::Block { height, .. } => *height,
-            StackItem::Bands { first, last } => BAND_H * (last - first + 1).min(MAX_BANDS) as f64,
+            StackItem::Bands { first, last } => {
+                let n = last - first + 1;
+                band_pitch(n) * n as f64
+            }
         }
     }
 }
@@ -132,7 +137,7 @@ fn ScaleNote() -> impl IntoView {
             Some(view! {
                 <p class="dim small scale-note">
                     {if log { "Block heights use a log scale of chunk size." } else { "Block heights are proportional to chunk size." }}
-                    " Chunks around 1% of the file or less are drawn as thin bands. Hover for details, click to open."
+                    " Chunks around 1% of the file or less are drawn as thin bands, one per chunk. Hover for details, click to open."
                 </p>
             })
         })
@@ -234,66 +239,77 @@ fn ChunkBlock(chunk: Chunk, file_len: usize, height: f64) -> impl IntoView {
     }
 }
 
-const BAND_LIST_PAGE: usize = 200;
+const BAND_PANEL_H: f64 = 52.0;
 
-/// A run of tiny chunks drawn as a few thin bands, which expands into a
-/// list of the chunks on hover.
+fn band_pitch(n: usize) -> f64 {
+    BAND_PITCH.min(MAX_BANDS_H / n as f64)
+}
+
+/// A run of tiny chunks drawn one thin band each. Hovering shows a single
+/// panel for the chunk under the cursor; clicking opens it.
 #[component]
 fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView {
     let app = expect_context::<AppState>();
-    let expanded = RwSignal::new(false);
-    let shown = RwSignal::new(BAND_LIST_PAGE);
+    let hovered = RwSignal::new(None::<usize>);
     let n = chunks.len();
     let first = chunks[0].index;
     let last = chunks[n - 1].index;
-    let bytes: usize = chunks.iter().map(|c| c.len()).sum();
-    let biggest = chunks.iter().map(|c| c.len()).max().unwrap_or(1);
-    let bands: Vec<&'static str> = (0..n.min(MAX_BANDS))
-        .map(|b| chunks[b * n / n.min(MAX_BANDS)].kind.key())
-        .collect();
+    let pitch = band_pitch(n);
+    let kinds: Vec<&'static str> = chunks.iter().map(|c| c.kind.key()).collect();
     let chunks = std::sync::Arc::new(chunks);
-    let list = move || {
-        expanded.get().then(|| {
-            let limit = shown.get();
-            view! {
-                <div class="bands-panel">
-                    <div class="bands-head dim">
-                        {if n == 1 { format!("chunk #{first}") } else { format!("chunks #{first}–#{last} · {n} chunks") }}
-                        {format!(" · {} B · {}", fmt::count_exact(bytes), fmt::pct(bytes, file_len))}
+    let at_cursor = move |ev: leptos::ev::MouseEvent| {
+        if app.chunk.get_untracked().is_some() {
+            return None;
+        }
+        Some(((ev.offset_y() as f64 / pitch) as usize).min(n - 1))
+    };
+    let panel = {
+        let chunks = chunks.clone();
+        move || {
+            let k = hovered.get()?;
+            let c = &chunks[k];
+            let top = k as f64 * pitch + pitch / 2.0 - BAND_PANEL_H / 2.0;
+            let context = match &c.facts.change {
+                Some(h) => format!(
+                    "{} · actor {}{}",
+                    format_time(h.time),
+                    fmt::short(&h.actor, 12),
+                    h.message.as_ref().map(|m| format!(" · “{m}”")).unwrap_or_default()
+                ),
+                None => format!("bytes {}..{}", c.range.start, c.range.end),
+            };
+            Some(view! {
+                <div class=format!("band-panel k-{}", c.kind.key()) style:top=format!("{top}px")>
+                    <div class="band-panel-line">
+                        <span class="idx">{format!("#{}", c.index)}</span>
+                        <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
+                        <span>{chunk_stats(c, file_len)}</span>
+                        {chunk_flag(c)}
+                        <span class="spacer"></span>
+                        <span class="dim small">{format!("{} of {n}", k + 1)}</span>
                     </div>
-                    {chunks.iter().take(limit).map(|c| {
-                        let i = c.index;
-                        view! {
-                            <button class="band-row" on:click=move |_| { expanded.set(false); select_chunk(app, i); }>
-                                <span class="idx">{format!("#{i}")}</span>
-                                <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
-                                <span class="dim">{chunk_stats(c, file_len)}</span>
-                                {chunk_flag(c)}
-                                <span class=format!("row-bar k-{}", c.kind.key())
-                                    style:width=format!("{}%", fmt::ratio(c.len(), biggest))></span>
-                            </button>
-                        }
-                    }).collect_view()}
-                    {(n > limit).then(|| view! {
-                        <button class="link more" on:click=move |_| shown.update(|s| *s += BAND_LIST_PAGE)>
-                            {format!("show more ({} remaining)", n - limit)}
-                        </button>
-                    })}
+                    <div class="band-panel-line dim">{context}</div>
                 </div>
-            }
-        })
+            })
+        }
     };
     view! {
         <div class="bands"
             class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
-            class:expanded=move || expanded.get()
+            class:hovering=move || hovered.get().is_some()
             style:--h=height.to_string()
-            on:mouseenter=move |_| if app.chunk.get_untracked().is_none() { expanded.set(true) }
-            on:mouseleave=move |_| { expanded.set(false); shown.set(BAND_LIST_PAGE); }>
+            on:mousemove=move |ev| hovered.set(at_cursor(ev))
+            on:mouseleave=move |_| hovered.set(None)
+            on:click=move |ev| {
+                if let Some(k) = at_cursor(ev) {
+                    hovered.set(None);
+                    select_chunk(app, chunks[k].index);
+                }
+            }>
             <div class="band-stripes">
-                {bands.into_iter().map(|k| view! { <i class=format!("k-{k}")></i> }).collect_view()}
+                {kinds.into_iter().map(|k| view! { <i class=format!("k-{k}")></i> }).collect_view()}
             </div>
-            {list}
+            {panel}
         </div>
     }
 }
