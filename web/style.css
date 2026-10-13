@@ -80,6 +80,7 @@ header.top {
   padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; white-space: nowrap; }
+.version { font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--dim); }
 .logo { width: 22px; height: 22px; color: var(--accent); }
 .logo.big { width: 56px; height: 56px; }
 .file-summary { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; }
@@ -175,15 +176,26 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .band-stripes { display: flex; flex-direction: column; gap: 1px; height: 100%; pointer-events: none; }
 .band-stripes i { flex: 1; min-height: 0; opacity: .55; transition: opacity .12s; }
 .bands.hovering .band-stripes i, .bands.sel .band-stripes i { opacity: .9; }
+.band-deck { position: absolute; left: 0; right: 0; height: 0; pointer-events: none; transition: top .12s ease; }
 .band-panel {
   --kc: var(--k-unknown);
-  position: absolute; left: 0; right: 0; z-index: 3; height: 52px; pointer-events: none;
+  position: absolute; left: 0; right: 0; top: -26px; height: 52px; z-index: 3; overflow: hidden;
   display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 10px;
   border-left: 4px solid var(--kc); border-radius: 6px;
   background: color-mix(in srgb, var(--kc) 22%, var(--panel));
   box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(0, 0, 0, .25);
   font-size: 12px; white-space: nowrap;
+  transition: top .14s ease, height .14s ease, left .14s ease, right .14s ease, opacity .14s ease;
+  animation: band-panel-in .14s ease;
 }
+@keyframes band-panel-in { from { opacity: 0; } }
+.band-panel.before, .band-panel.after { height: 26px; left: 18px; right: 18px; z-index: 2; opacity: .8; justify-content: flex-start; padding-top: 4px; box-shadow: 0 0 0 1px var(--line); }
+.band-panel.before { top: -48px; justify-content: flex-end; padding: 0 10px 4px; }
+.band-panel.after { top: 22px; }
+.band-panel.before .band-panel-line + .band-panel-line, .band-panel.after .band-panel-line + .band-panel-line { display: none; }
+.band-panel.before2, .band-panel.after2 { height: 0; left: 36px; right: 36px; z-index: 1; opacity: 0; padding: 0 10px; }
+.band-panel.before2 { top: -48px; }
+.band-panel.after2 { top: 48px; }
 .band-panel.k-doc { --kc: var(--k-doc); } .band-panel.k-change { --kc: var(--k-change); } .band-panel.k-compressed { --kc: var(--k-compressed); }
 .band-panel.k-bundle { --kc: var(--k-bundle); } .band-panel.k-changeset { --kc: var(--k-changeset); }
 .band-panel-line { display: flex; gap: 8px; align-items: center; overflow: hidden; text-overflow: ellipsis; }
@@ -192,7 +204,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .storage.open .blk, .storage.open .bands { height: auto; flex: var(--h) 1 0; padding: 0; border-left-width: 0; border-radius: 3px; box-shadow: none; }
 .storage.open .blk { background: var(--kc); opacity: .5; }
 .storage.open .blk.sel, .storage.open .bands.sel { opacity: 1; outline: 2px solid var(--text); outline-offset: -2px; }
-.storage.open .blk-label, .storage.open .blk-stats, .storage.open .band-panel { display: none; }
+.storage.open .blk-label, .storage.open .blk-stats, .storage.open .band-deck { display: none; }
 .stack-close {
   position: absolute; inset: 0; z-index: 2; display: grid; place-items: center;
   border: 0; border-radius: 6px; background: transparent; cursor: pointer;

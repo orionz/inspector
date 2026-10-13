@@ -10,6 +10,10 @@ if [[ "${1:-}" == "--dev" ]]; then
   CARGO_FLAGS=()
 fi
 
+# The build number is the commit count, shown in the app header.
+export APP_VERSION="v$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+export APP_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+
 cargo build -p app --target wasm32-unknown-unknown "${CARGO_FLAGS[@]}"
 
 rm -rf dist
@@ -23,10 +27,10 @@ if [[ "$PROFILE" == release ]] && command -v wasm-opt >/dev/null; then
     || echo "wasm-opt failed; shipping the unoptimised module"
 fi
 
-VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo dev)-$(date +%s)"
+VERSION="$APP_VERSION-$APP_COMMIT-$(date +%s)"
 cp web/* dist/
 sed -i "s/__VERSION__/$VERSION/g" dist/index.html dist/sw.js
 cp corpus/* dist/samples/
 touch dist/.nojekyll
 
-echo "built dist/ ($VERSION): $(du -sh dist | cut -f1), wasm $(du -h dist/pkg/automerge-inspector_bg.wasm | cut -f1)"
+echo "built dist/ ($APP_VERSION, $VERSION): $(du -sh dist | cut -f1), wasm $(du -h dist/pkg/automerge-inspector_bg.wasm | cut -f1)"

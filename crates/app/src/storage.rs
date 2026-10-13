@@ -239,14 +239,16 @@ fn ChunkBlock(chunk: Chunk, file_len: usize, height: f64) -> impl IntoView {
     }
 }
 
-const BAND_PANEL_H: f64 = 52.0;
+/// How many neighbouring panels are kept either side of the hovered chunk.
+const DECK_REACH: usize = 2;
 
 fn band_pitch(n: usize) -> f64 {
     BAND_PITCH.min(MAX_BANDS_H / n as f64)
 }
 
-/// A run of tiny chunks drawn one thin band each. Hovering shows a single
-/// panel for the chunk under the cursor; clicking opens it.
+/// A run of tiny chunks drawn one thin band each. Hovering shows a panel for
+/// the chunk under the cursor, with its neighbours half-sized behind it;
+/// clicking opens it.
 #[component]
 fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView {
     let app = expect_context::<AppState>();
@@ -265,10 +267,8 @@ fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView
     };
     let panel = {
         let chunks = chunks.clone();
-        move || {
-            let k = hovered.get()?;
+        move |k: usize| {
             let c = &chunks[k];
-            let top = k as f64 * pitch + pitch / 2.0 - BAND_PANEL_H / 2.0;
             let context = match &c.facts.change {
                 Some(h) => format!(
                     "{} · actor {}{}",
@@ -278,8 +278,19 @@ fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView
                 ),
                 None => format!("bytes {}..{}", c.range.start, c.range.end),
             };
-            Some(view! {
-                <div class=format!("band-panel k-{}", c.kind.key()) style:top=format!("{top}px")>
+            let kind = c.kind.key();
+            let class = move || {
+                let role = match hovered.get().map(|h| k as isize - h as isize).unwrap_or(0) {
+                    ..=-2 => "before2",
+                    -1 => "before",
+                    0 => "current",
+                    1 => "after",
+                    _ => "after2",
+                };
+                format!("band-panel k-{kind} {role}")
+            };
+            view! {
+                <div class=class>
                     <div class="band-panel-line">
                         <span class="idx">{format!("#{}", c.index)}</span>
                         <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
@@ -290,15 +301,26 @@ fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView
                     </div>
                     <div class="band-panel-line dim">{context}</div>
                 </div>
-            })
+            }
         }
+    };
+    // The hovered chunk plus two neighbours each side, keyed by chunk so a
+    // panel keeps its element (and animates) as it moves between roles.
+    let deck = move || match hovered.get() {
+        Some(k) => (k.saturating_sub(DECK_REACH)..(k + DECK_REACH + 1).min(n)).collect(),
+        None => vec![],
     };
     view! {
         <div class="bands"
             class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
             class:hovering=move || hovered.get().is_some()
             style:--h=height.to_string()
-            on:mousemove=move |ev| hovered.set(at_cursor(ev))
+            on:mousemove=move |ev| {
+                let k = at_cursor(ev);
+                if hovered.get_untracked() != k {
+                    hovered.set(k);
+                }
+            }
             on:mouseleave=move |_| hovered.set(None)
             on:click=move |ev| {
                 if let Some(k) = at_cursor(ev) {
@@ -309,7 +331,10 @@ fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView
             <div class="band-stripes">
                 {kinds.into_iter().map(|k| view! { <i class=format!("k-{k}")></i> }).collect_view()}
             </div>
-            {panel}
+            <div class="band-deck"
+                style:top=move || hovered.get().map(|k| format!("{}px", k as f64 * pitch + pitch / 2.0))>
+                <For each=deck key=|k| *k children=panel/>
+            </div>
         </div>
     }
 }

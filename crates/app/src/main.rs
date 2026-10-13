@@ -11,6 +11,15 @@ use wasm_bindgen_futures::JsFuture;
 
 use state::{AppState, Tab};
 
+const APP_VERSION: &str = match option_env!("APP_VERSION") {
+    Some(v) => v,
+    None => "dev",
+};
+const APP_COMMIT: &str = match option_env!("APP_COMMIT") {
+    Some(c) => c,
+    None => "dev",
+};
+
 const SAMPLES: &[(&str, &str)] = &[
     ("todo-save-plus-incrementals.automerge", "save() then 104 × save_incremental(): bulk imports between runs of single edits"),
     ("text-next-save-plus-incrementals.automerge", "next API: change-set save + incremental change sets"),
@@ -101,6 +110,7 @@ fn Header() -> impl IntoView {
             <div class="brand">
                 <svg viewBox="0 0 32 32" class="logo"><use href="#logo"/></svg>
                 <span>"Automerge Inspector"</span>
+                <span class="version" title=format!("build {APP_VERSION} · commit {APP_COMMIT}")>{APP_VERSION}</span>
             </div>
             <div class="file-summary">{summary}</div>
             <Show when=move || app.file.with(|f| f.is_some())>
