@@ -671,7 +671,7 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                 <p class="dim">"Stored in the chunk header (see above)."</p>
             </div>
         })>
-            <div class="card group">
+            <div class="card group" class:logical=move || view_of() == GroupView::Logical>
                 <div class="card-title">
                     <b>{title}</b>
                     {move || with_chunk(app, |_, c| c.group(ops).map(|g| view! {
@@ -750,7 +750,7 @@ fn pager(page: RwSignal<usize>, pages: usize, total: usize, unit: &'static str) 
     }
 }
 
-const ROWS_PAGE: usize = 50;
+const ROWS_PAGE: usize = 200;
 
 #[component]
 fn RowsView(ops: bool) -> impl IntoView {
@@ -768,18 +768,19 @@ fn RowsView(ops: bool) -> impl IntoView {
         let actors = with_chunk(app, |_, c| c.facts.actors.clone()).unwrap_or_default();
         Some(view! {
             {pager(page, pages, table.rows, "rows")}
-            <div class="scroll-x">
+            <div class="rows-wrap">
                 <table class="dense rows mono">
                     <thead><tr>
-                        {table.fields.iter().map(|f| view! { <th>{f.name.clone()}</th> }).collect_view()}
+                        {table.shown().into_iter().map(|(name, _)| view! { <th>{name}</th> }).collect_view()}
                     </tr></thead>
                     <tbody>
                         {move || t.with_value(|t| {
                             let start = page.get() * ROWS_PAGE;
+                            let cols = t.shown();
                             (start..(start + ROWS_PAGE).min(t.rows)).map(|r| view! {
                                 <tr>
-                                    {t.fields.iter().map(|f| {
-                                        let v = f.render_with(r, &actors);
+                                    {cols.iter().map(|&(_, col)| {
+                                        let v = t.render_shown(col, r, &actors);
                                         let title = v.clone();
                                         view! { <td title=title>{v}</td> }
                                     }).collect_view()}

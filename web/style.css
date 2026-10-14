@@ -276,6 +276,8 @@ table.cols td.mono { font-size: 12px; }
 .pager span { color: var(--dim); padding: 0 6px; }
 table.rows td { max-width: 28ch; }
 .group .scroll-x { max-height: 520px; overflow: auto; }
+.rows-wrap { overflow-x: auto; }
+.card.group.logical { min-height: calc(100vh - 140px); box-sizing: border-box; margin-bottom: 0; }
 .changes { max-height: 560px; overflow-y: auto; }
 
 .changes { display: flex; flex-direction: column; }

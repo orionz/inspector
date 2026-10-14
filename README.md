@@ -30,9 +30,11 @@ The three views sit on folder tabs above the file area.
   - **Physical**: the columns side by side, coloured by type, hanging from
     their names with length proportional to stored bytes (hover for share of
     group/file and bytes per row)
-  - **Logical**: the columns recombined into rows (op ids as `ctr@abcd` with
-    the actor's first four hex digits, `ROOT` for the root object, keys, typed
-    values, pred/succ lists)
+  - **Logical**: the columns recombined into rows: id first, op ids as
+    `ctr@abcd` with the actor's first four hex digits, `ROOT` for the root
+    object, insert as `t`/`f`, the action and value as one column
+    (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
+    The table runs to the bottom of the window and scrolls with the page
 - Clicking a column opens its runs: repeat / literal / null byte split, every
   run with its row range, decoded values (deltas shown with their absolute
   span) and encoded bytes. Raw value columns show bytes per value type.

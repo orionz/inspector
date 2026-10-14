@@ -790,6 +790,63 @@ pub const ACTIONS: [&str; 8] = [
     "makeMap", "set", "makeList", "del", "makeText", "inc", "makeTable", "mark",
 ];
 
+/// A column of the logical view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShownCol {
+    Field(usize),
+    /// An op's action with its value, e.g. `Set "cow"` or `Inc 27`.
+    Action { action: usize, value: Option<usize> },
+}
+
+impl RowTable {
+    /// The columns of the logical view in reading order: `id` before `obj`,
+    /// and `action` merged with `value` into one `Action` column.
+    pub fn shown(&self) -> Vec<(String, ShownCol)> {
+        let pos = |n: &str| self.fields.iter().position(|f| f.name == n);
+        let (action, value) = (pos("action"), pos("value"));
+        let mut order: Vec<usize> = (0..self.fields.len()).collect();
+        if let (Some(id), Some(obj)) = (pos("id"), pos("obj")) {
+            if id > obj {
+                order.remove(id);
+                order.insert(obj, id);
+            }
+        }
+        order
+            .into_iter()
+            .filter_map(|i| match (action, value) {
+                (Some(a), v) if i == a => Some(("Action".to_string(), ShownCol::Action { action: a, value: v })),
+                (Some(_), Some(v)) if i == v => None,
+                _ => Some((self.fields[i].name.clone(), ShownCol::Field(i))),
+            })
+            .collect()
+    }
+
+    /// One cell of the logical view; see [`Field::render_with`] for `actors`.
+    pub fn render_shown(&self, col: ShownCol, row: usize, actors: &[String]) -> String {
+        match col {
+            ShownCol::Field(i) => self.fields[i].render_with(row, actors),
+            ShownCol::Action { action, value } => {
+                let FieldData::Scalar(v) = &self.fields[action].data else {
+                    return self.fields[action].render_with(row, actors);
+                };
+                let Some(a) = v.get(row).and_then(Cell::as_u64) else {
+                    return String::new();
+                };
+                let name = match ACTIONS.get(a as usize) {
+                    Some(n) if n.starts_with("make") => return n.to_string(),
+                    Some(&"del") => return "Del".into(),
+                    Some(n) => n[..1].to_uppercase() + &n[1..],
+                    None => format!("action{a}"),
+                };
+                match value.map(|v| self.fields[v].render_with(row, actors)) {
+                    Some(v) if !v.is_empty() => format!("{name} {v}"),
+                    _ => name,
+                }
+            }
+        }
+    }
+}
+
 impl Field {
     pub fn len(&self) -> usize {
         match &self.data {
@@ -835,6 +892,7 @@ impl Field {
                 }
                 match c {
                     Cell::Null => String::new(),
+                    Cell::B(b) => if b { "t" } else { "f" }.into(),
                     Cell::S(s) => truncate(&s, 60),
                     c => c.to_string(),
                 }
@@ -879,7 +937,7 @@ impl Field {
                 } else {
                     String::new()
                 };
-                format!("[{}{}]", shown.join(", "), more)
+                format!("{}{}", shown.join(", "), more)
             }
         }
     }
