@@ -41,8 +41,8 @@ pub fn title(link: &str) -> Option<String> {
 /// What the server stores for a document, reduced to the pieces a reader needs.
 pub struct Fetched {
     /// The fragments and then the loose commits, each in causal order and
-    /// each the automerge chunk it was stored as, flagged when it only
-    /// repeats changes a fragment or an earlier commit already holds.
+    /// each the automerge chunk it was stored as, flagged when every change
+    /// it holds is also in chunks that aren't flagged.
     pub chunks: Vec<(Vec<u8>, bool)>,
     pub fragments: usize,
     pub commits: usize,
@@ -112,35 +112,65 @@ pub async fn fetch(doc_id: &str) -> Result<Fetched, String> {
     let tree_fragments: Vec<&Fragment> = tree.fragments().collect();
     let tree_commits: Vec<&LooseCommit> = tree.loose_commits().collect();
     let order = tree.topsorted_blob_order().map_err(|e| format!("{e:?}"))?;
-    let mut fragment_chunks = vec![];
-    let mut commit_chunks = vec![];
+    let mut pieces: Vec<(Vec<u8>, Option<&Fragment>)> = vec![];
+    let mut loose = vec![];
     for item in order {
         match item {
-            SedimentreeItem::Fragment(i) => fragment_chunks.extend(fragment_blobs.remove(&tree_fragments[i].head()).unwrap_or_default()),
-            SedimentreeItem::LooseCommit(i) => commit_chunks.extend(commit_blobs.remove(&tree_commits[i].head()).unwrap_or_default()),
+            SedimentreeItem::Fragment(i) => {
+                let f = tree_fragments[i];
+                pieces.extend(fragment_blobs.remove(&f.head()).unwrap_or_default().into_iter().map(|b| (b, Some(f))));
+            }
+            SedimentreeItem::LooseCommit(i) => loose.extend(commit_blobs.remove(&tree_commits[i].head()).unwrap_or_default()),
         }
     }
-    let mut in_fragments = automerge::Automerge::new();
-    let _ = in_fragments.load_incremental(&fragment_chunks.concat());
-    let mut seen: HashSet<ChangeHash> = in_fragments.get_changes_meta(&[]).iter().map(|m| m.hash).collect();
-    let mut seen_blobs: HashSet<&[u8]> = HashSet::new();
-    let commits: Vec<(&Vec<u8>, bool)> = commit_chunks
+    let fragments = pieces.len();
+    let commits = loose.len();
+    pieces.extend(loose.into_iter().map(|b| (b, None)));
+
+    let mut doc = automerge::Automerge::new();
+    let _ = doc.load_incremental(&pieces.iter().map(|(b, _)| b.as_slice()).collect::<Vec<_>>().concat());
+    let deps: HashMap<ChangeHash, Vec<ChangeHash>> = doc.get_changes_meta(&[]).into_iter().map(|m| (m.hash, m.deps)).collect();
+    let hash = |id: CommitId| ChangeHash(*id.as_bytes());
+    let members: Vec<HashSet<ChangeHash>> = pieces
         .iter()
-        .map(|c| {
-            let repeat = !seen_blobs.insert(c.as_slice())
-                || Change::try_from(&c[..]).is_ok_and(|c| !seen.insert(c.hash()));
-            (c, repeat)
+        .map(|(blob, fragment)| match fragment {
+            Some(f) => fragment_members(hash(f.head()), &f.boundary().iter().map(|&b| hash(b)).collect(), &deps),
+            None => Change::try_from(&blob[..]).map(|c| HashSet::from([c.hash()])).unwrap_or_default(),
         })
         .collect();
+    let mut by_size: Vec<usize> = (0..pieces.len()).collect();
+    by_size.sort_by_key(|&i| std::cmp::Reverse(members[i].len()));
+    let mut held: HashSet<ChangeHash> = HashSet::new();
+    let mut redundant = vec![false; pieces.len()];
+    for i in by_size {
+        if !members[i].is_empty() && members[i].is_subset(&held) {
+            redundant[i] = true;
+        } else {
+            held.extend(members[i].iter().copied());
+        }
+    }
     Ok(Fetched {
-        fragments: fragment_chunks.len(),
-        commits: commits.len(),
-        chunks: fragment_chunks
-            .iter()
-            .map(|f| (f.clone(), false))
-            .chain(commits.iter().map(|&(c, r)| (c.clone(), r)))
-            .collect(),
+        fragments,
+        commits,
+        chunks: pieces.into_iter().zip(redundant).map(|((b, _), r)| (b, r)).collect(),
     })
+}
+
+/// The changes a fragment holds: its head and everything behind it, down to but not including its boundary.
+fn fragment_members(
+    head: ChangeHash,
+    boundary: &HashSet<ChangeHash>,
+    deps: &HashMap<ChangeHash, Vec<ChangeHash>>,
+) -> HashSet<ChangeHash> {
+    let mut members = HashSet::new();
+    let mut stack = vec![head];
+    while let Some(h) = stack.pop() {
+        if boundary.contains(&h) || !members.insert(h) {
+            continue;
+        }
+        stack.extend(deps.get(&h).into_iter().flatten().copied());
+    }
+    members
 }
 
 struct Socket {

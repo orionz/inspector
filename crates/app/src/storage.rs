@@ -256,7 +256,7 @@ fn color_key(c: &Chunk) -> &'static str {
 
 fn dep_warning(c: &Chunk) -> Option<&'static str> {
     if c.redundant {
-        return Some("is redundant: the server also sent a fragment or an earlier commit holding the same changes");
+        return Some("is redundant: every change in it is also in other chunks the server sent");
     }
     match c.dep_order {
         DepOrder::InOrder => None,

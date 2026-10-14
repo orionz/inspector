@@ -488,3 +488,4 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 
 .am-link { color: var(--accent, #3b6ef0); text-decoration: underline; text-underline-offset: 2px; }
 .am-link:hover { text-decoration-thickness: 2px; }
+.fetch-note { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--k-redundant); border-radius: 8px; background: color-mix(in srgb, var(--k-redundant) 12%, var(--panel)); font-size: 13px; }

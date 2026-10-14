@@ -110,7 +110,8 @@ fn open_link(app: AppState, link: String) {
                     bytes.extend_from_slice(chunk);
                 }
                 app.fetched.set(Some(format!(
-                    "{} fragments + {} loose commits ({} redundant)",
+                    "{} sent {} fragments and {} loose commits. {} of these chunks (magenta) are redundant: every change in them is also in chunks that aren't.",
+                    patchwork::SERVER.trim_start_matches("wss://"),
                     fmt::count_exact(f.fragments),
                     fmt::count_exact(f.commits),
                     fmt::count_exact(redundant.len())
@@ -147,7 +148,6 @@ fn Header() -> impl IntoView {
                     <span class="pill">{format!("{} chunks", r.chunks.len())}</span>
                     <span class="pill">{format!("{} changes", fmt::count(changes))}</span>
                     <span class="pill">{format!("{} ops", fmt::count(ops))}</span>
-                    {app.fetched.get().map(|f| view! { <span class="pill" title="What the sync server sent; redundant chunks (magenta) only repeat changes a fragment or an earlier commit already holds">{f}</span> })}
                 }
             })
         })
@@ -266,7 +266,10 @@ fn Folder() -> impl IntoView {
             </nav>
             <div class=move || format!("folder-body {}", color())>
                 {move || match app.tab.get() {
-                    Tab::Load => view! { <storage::StorageTab/> }.into_any(),
+                    Tab::Load => view! {
+                        {app.fetched.get().map(|f| view! { <div class="fetch-note">{f}</div> })}
+                        <storage::StorageTab/>
+                    }.into_any(),
                     Tab::Document => view! { <document::DocumentTab/> }.into_any(),
                     Tab::Save => view! { <storage::SaveTab/> }.into_any(),
                 }}
