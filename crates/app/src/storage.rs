@@ -547,12 +547,16 @@ fn ChunkDetail() -> impl IntoView {
         _ => None,
     };
     let side_tab = move |v: GroupView, label: &'static str| {
+        let shows = move |cur: GroupView| cur == v || (v == GroupView::Physical && cur == GroupView::Raw);
         let active = move || {
             let (a, b) = app.group_view.get();
-            ops_part().is_some_and(|ops| if ops { b == v } else { a == v })
+            ops_part().is_some_and(|ops| shows(if ops { b } else { a }))
         };
         view! {
             <button class:active=active on:click=move |_| {
+                if active() {
+                    return;
+                }
                 let ops = ops_part().unwrap_or(false);
                 app.group_view.update(|g| if ops { g.1 = v } else { g.0 = v });
                 app.column.set(None);
@@ -572,7 +576,6 @@ fn ChunkDetail() -> impl IntoView {
                 <nav class="side-tabs">
                     {side_tab(GroupView::Physical, "Physical")}
                     {side_tab(GroupView::Logical, "Logical")}
-                    {side_tab(GroupView::Raw, "Raw")}
                 </nav>
             </Show>
         </div>
@@ -679,18 +682,27 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                     }))}
                 </div>
                 {move || match view_of() {
-                    GroupView::Physical => view! {
-                        <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
-                            <div class="cols-wrap"><ColumnStrip ops=ops grouped=true/></div>
-                            <section class="col-detail"><RunPanel/></section>
-                        </div>
-                    }.into_any(),
-                    GroupView::Raw => view! {
-                        <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
-                            <div class="cols-wrap"><ColumnStrip ops=ops grouped=false/></div>
-                            <section class="col-detail"><RawColumn/></section>
-                        </div>
-                    }.into_any(),
+                    GroupView::Physical | GroupView::Raw => {
+                        let grouped = view_of() == GroupView::Physical;
+                        let strip_tab = move |v: GroupView, label: &'static str| view! {
+                            <button class:active=move || view_of() == v on:click=move |_| {
+                                app.group_view.update(|g| if ops { g.1 = v } else { g.0 = v });
+                                app.column.set(None);
+                            }>{label}</button>
+                        };
+                        view! {
+                            <nav class="strip-tabs" class:hidden=move || app.column.get().is_some()>
+                                {strip_tab(GroupView::Physical, "Grouped")}
+                                {strip_tab(GroupView::Raw, "Raw")}
+                            </nav>
+                            <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
+                                <div class="cols-wrap"><ColumnStrip ops=ops grouped=grouped/></div>
+                                <section class="col-detail">
+                                    {if grouped { view! { <RunPanel/> }.into_any() } else { view! { <RawColumn/> }.into_any() }}
+                                </section>
+                            </div>
+                        }.into_any()
+                    }
                     GroupView::Logical => view! { <RowsView ops=ops/> }.into_any(),
                 }}
             </div>
@@ -723,9 +735,10 @@ fn ColumnStrip(ops: bool, grouped: bool) -> impl IntoView {
                 <div class="col-strip">
                     {spans.into_iter().map(|span| {
                         let me = ColumnRef { ops, index: span.start };
+                        let multi = span.len() > 1;
                         let bytes: usize = g.columns[span.clone()].iter().map(|c| c.stored_len.max(1)).sum();
                         view! {
-                            <div class="strip-group" class:sel=move || app.column.get() == Some(me)
+                            <div class="strip-group" class:multi=multi class:sel=move || app.column.get() == Some(me)
                                 style=format!("--b: {bytes}")
                                 on:click=move |_| app.column.update(|c| *c = (*c != Some(me)).then_some(me))>
                     {g.columns[span].iter().map(|col| {

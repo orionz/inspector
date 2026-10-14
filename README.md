@@ -26,7 +26,7 @@ The three views sit on folder tabs above the file area.
   second band beside the chunk band. In any band, click another chunk, part
   or column to switch to it, or the open one to go back one level; clicking a
   band of small chunks goes back to the stack.
-- Changes and Ops get Physical / Logical / Raw tabs on the right edge:
+- Changes and Ops get Physical / Logical tabs on the right edge:
   - **Physical**: the columns side by side, coloured by type, hanging from
     their names with length proportional to stored bytes (hover for share of
     group/file and bytes per row)
@@ -36,14 +36,14 @@ The three views sit on folder tabs above the file area.
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
-  - **Raw**: the same columns, each on its own; opening one shows just its
-    bytes as stored in the file (still deflated if the column is)
-- In Physical, columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
-  `key.ctr`, `value.meta` + `value.raw`, …) highlight and open together;
-  `key.str` stands alone. Clicking one shrinks the columns into a third band
-  (each sized by its bytes), hides the Physical / Logical tabs, and opens the
-  field's runs beside it; click another column in the band to switch, or the
-  open one to go back.
+- Physical has Grouped / Raw tabs over the columns. **Grouped** boxes the
+  columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
+  `key.ctr`, `value.meta` + `value.raw`, …; `key.str` stands alone), and they
+  highlight and open together into the runs view. **Raw** drops the boxes and
+  opens each column on its own to just its bytes as stored in the file (still
+  deflated if the column is). Opening a column shrinks the columns into a
+  third band (each sized by its bytes) beside the detail; click another
+  column in the band to switch, or the open one to go back.
 - The runs view is one table, paged to fit the window: the row count on top,
   row ranges first (split wherever any column's run changes), then a column
   per encoded column, headed by its name in its type's colour with its bytes
