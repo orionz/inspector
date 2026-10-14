@@ -322,6 +322,7 @@ fn ChunkStack() -> impl IntoView {
     let panel = move |k: usize| {
         let card = cards.with_value(|c| c[k].clone());
         let kind = card.kind;
+        let block = if rows.with_value(|r| r[k].band) { "" } else { " block" };
         let class = move || {
             let role = match hovered.get().map(|h| k as isize - h as isize).unwrap_or(0) {
                 ..=-2 => "before2",
@@ -330,7 +331,7 @@ fn ChunkStack() -> impl IntoView {
                 1 => "after",
                 _ => "after2",
             };
-            format!("deck-panel k-{kind} {role}")
+            format!("deck-panel k-{kind} {role}{block}")
         };
         view! {
             <div class=class>
