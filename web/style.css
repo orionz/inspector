@@ -495,12 +495,11 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-edge { stroke: var(--dim); stroke-width: 1.2; }
 .mem-node { cursor: pointer; }
 .mem-node rect { fill: color-mix(in srgb, var(--accent) 22%, var(--panel)); stroke: var(--line); }
-.mem-node.leaf rect { fill: color-mix(in srgb, var(--k-change) 40%, var(--panel)); }
 .mem-node:hover rect { filter: brightness(.92); }
 .mem-node.sel rect { stroke: var(--text); stroke-width: 2; }
 .mem-node text { font-size: 11px; text-anchor: middle; fill: var(--text); pointer-events: none; }
 .mem-slabs { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0; }
-.mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-change) 30%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
+.mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-bundle) 35%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
 .mem-slab:hover { filter: brightness(.92); }
 .mem-slab.sel { outline: 2px solid var(--text); color: var(--text); }
 .mem-slab-detail { border-top: 1px solid var(--line); padding-top: 8px; }

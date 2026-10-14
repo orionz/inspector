@@ -1121,14 +1121,14 @@ fn tree_nodes(root: &NodeDebug) -> Vec<TreeNode> {
 const LEAF_W: (f64, f64) = (10.0, 44.0);
 const TREE_FIT: f64 = 960.0;
 const NODE_W: f64 = 36.0;
-/// Slab boxes shown for one node; pick a lower node to see the rest.
+/// Slab boxes shown for one leaf.
 const SLABS_SHOWN: usize = 1024;
 const NODE_H: f64 = 22.0;
 const LEVEL_H: f64 = 64.0;
 
 /// The selected column loaded into hexane: its slab index drawn as a tree.
-/// Clicking a node shows its entries and its slabs; clicking a slab spells
-/// out its bytes, segments and realized values.
+/// Clicking a node shows its entries, and a leaf also its slabs; clicking a
+/// slab spells out its bytes, segments and realized values.
 #[component]
 fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let app = expect_context::<AppState>();
@@ -1172,7 +1172,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                 let w = if n.leaf { NODE_W.min(leaf_w - 2.0) } else { NODE_W };
                 let label = (w >= 24.0).then(|| n.slabs.len().to_string());
                 view! {
-                    <g class="mem-node" class:leaf=n.leaf class:sel=move || node.get() == i
+                    <g class="mem-node" class:sel=move || node.get() == i
                         on:click=move |_| { node.set(i); slab.set(None); }>
                         <title>{format!("{} · {} slabs", if n.leaf { "leaf" } else { "internal node" }, n.slabs.len())}</title>
                         <rect x=x - w / 2.0 y=y width=w height=NODE_H rx=if w < 12.0 { 2 } else { 5 }/>
@@ -1187,21 +1187,21 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             let Ok((m, nodes)) = &*mem else { return None };
             let i = node.get();
             let n = nodes.get(i)?;
-            let kind = if n.leaf { "Leaf" } else if n.parent.is_none() { "Root" } else { "Internal node" };
             let hidden = n.slabs.len().saturating_sub(SLABS_SHOWN);
-            let slabs = n
-                .slabs
-                .clone()
-                .take(SLABS_SHOWN)
-                .map(|k| {
-                    let s = &m.slabs[k].debug;
-                    view! {
-                        <button class="mem-slab" class:sel=move || slab.get() == Some(k)
-                            title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
-                            on:click=move |_| slab.set(Some(k))>{k}</button>
-                    }
-                })
-                .collect_view();
+            let slabs = n.leaf.then(|| {
+                n.slabs
+                    .clone()
+                    .take(SLABS_SHOWN)
+                    .map(|k| {
+                        let s = &m.slabs[k].debug;
+                        view! {
+                            <button class="mem-slab" class:sel=move || slab.get() == Some(k)
+                                title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
+                                on:click=move |_| slab.set(Some(k))>{k}</button>
+                        }
+                    })
+                    .collect_view()
+            });
             let slab_detail = slab.get().and_then(|k| {
                 let s = m.slabs.get(k)?;
                 let d = &s.debug;
@@ -1220,12 +1220,13 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             });
             Some(view! {
                 <div class="mem-detail">
-                    <b>{format!("{kind} · depth {} · slabs {}..{}", n.depth, n.slabs.start, n.slabs.end)}</b>
                     <ul class="mono">{n.entries.iter().map(|e| view! { <li>{e.clone()}</li> }).collect_view()}</ul>
-                    <div class="mem-slabs">
-                        {slabs}
-                        {(hidden > 0).then(|| view! { <span class="dim">{format!("+{hidden} more slabs; pick a lower node to see them")}</span> })}
-                    </div>
+                    {slabs.map(|slabs| view! {
+                        <div class="mem-slabs">
+                            {slabs}
+                            {(hidden > 0).then(|| view! { <span class="dim">{format!("+{hidden} more slabs")}</span> })}
+                        </div>
+                    })}
                     {slab_detail}
                 </div>
             })
@@ -1235,7 +1236,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                 <div class="mem-head">
                     <b class="mono">{m.type_name}</b>
                     <span class="dim">{format!("{} slabs · {} nodes · depth {}", m.slabs.len(), nodes.len(), depth + 1)}</span>
-                    <span class="dim">"click a node, then one of its slabs"</span>
+                    <span class="dim">"click a node; leaves hold the slabs"</span>
                 </div>
                 <div class="mem-scroll">
                     <svg class="mem-tree" width=width height=height>
