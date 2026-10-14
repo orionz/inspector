@@ -38,7 +38,7 @@ pub fn StorageTab() -> impl IntoView {
     }
 }
 
-/// The storage view of what `doc.save()` writes for the loaded document,
+/// The storage view of what `next::Automerge::save()` writes for the loaded document,
 /// with its own chunk selection.
 #[component]
 pub fn SaveTab() -> impl IntoView {

@@ -239,7 +239,7 @@ fn Folder() -> impl IntoView {
     let tabs = [
         (Tab::Load, "t-load", "Load", "The file as loaded"),
         (Tab::Document, "t-doc", "Document", "The document's objects, maps and text"),
-        (Tab::Save, "t-save", "Save", "What doc.save() writes for this document"),
+        (Tab::Save, "t-save", "Save", "What next::Automerge::save() writes for this document: the change set format"),
     ];
     let color = move || tabs.iter().find(|t| t.0 == app.tab.get()).map_or("", |t| t.1);
     let stats = move || match app.tab.get() {

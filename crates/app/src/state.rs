@@ -69,7 +69,7 @@ type Local<T> = RwSignal<T, LocalStorage>;
 #[derive(Clone, Copy)]
 pub struct AppState {
     pub file: Local<Option<Rc<Loaded>>>,
-    /// What `doc.save()` writes for the loaded document.
+    /// What `next::Automerge::save()` writes for the loaded document.
     pub saved: Local<Option<Rc<Loaded>>>,
     /// How long automerge takes to load the file and the saved file, in ms.
     pub load_ms: (RwSignal<Option<f64>>, RwSignal<Option<f64>>),
@@ -205,7 +205,7 @@ impl AppState {
                         let bytes = saved.unwrap_or_default();
                         let mut report = parse_structure(&bytes);
                         resolve_deps(&mut report, &sum.saved_known_deps.iter().map(String::as_str).collect());
-                        self.saved.set(Some(Rc::new(Loaded { name: "doc.save()".into(), bytes, report })));
+                        self.saved.set(Some(Rc::new(Loaded { name: "next::Automerge::save()".into(), bytes, report })));
                         self.step.set(sum.changes);
                         leptos::task::spawn_local(async move {
                             if let Some((Resp::Ms(ms), _)) = worker::call(None, Req::SavedLoadMs, None).await {

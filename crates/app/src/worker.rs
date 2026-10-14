@@ -73,14 +73,14 @@ pub struct Summary {
     pub load_ms: f64,
     /// The requested hidden dependencies that the document holds.
     pub known_deps: Vec<String>,
-    /// The same for the hidden dependencies of `doc.save()`'s output.
+    /// The same for the hidden dependencies of `next::Automerge::save()`'s output.
     pub saved_known_deps: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Req {
     /// Loads the file sent alongside; answered with [`Resp::Loaded`] and the
-    /// bytes `doc.save()` writes.
+    /// bytes `next::Automerge::save()` writes.
     Load { hidden_deps: Vec<String> },
     /// How long automerge takes to load the saved bytes.
     SavedLoadMs,
@@ -171,7 +171,7 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
     }
     if let Req::SavedLoadMs = req {
         let start = now();
-        let _ = Automerge::load(&held.saved);
+        let _ = automerge::next::Automerge::load(&held.saved);
         return (Resp::Ms(now() - start), None);
     }
     let Some(m) = held.model.as_ref() else {
@@ -268,7 +268,7 @@ fn load(held: &mut Held, bytes: &[u8], hidden_deps: Vec<String>) -> (Resp, Optio
         Ok(doc) => DocModel::from_doc(doc),
         Err(e) => return (Resp::Loaded(Err(e.to_string())), None),
     };
-    let saved = m.doc.save();
+    let saved = m.doc.clone().into_next().save();
     let known = |deps: Vec<String>| deps.into_iter().filter(|d| m.has_change(d)).collect();
     let summary = Summary {
         changes: m.changes.len(),
