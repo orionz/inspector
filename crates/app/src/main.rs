@@ -9,7 +9,9 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
-use state::{AppState, Tab};
+use std::rc::Rc;
+
+use state::{AppState, Loaded, Tab};
 
 const APP_VERSION: &str = match option_env!("APP_VERSION") {
     Some(v) => v,
@@ -155,6 +157,26 @@ fn Welcome() -> impl IntoView {
     }
 }
 
+fn file_stats(file: RwSignal<Option<Rc<Loaded>>, LocalStorage>, load_ms: RwSignal<Option<f64>>) -> String {
+    file.with(|f| {
+        let Some(f) = f else { return String::new() };
+        let r = &f.report;
+        let changes: usize = r.chunks.iter().map(|c| c.num_changes()).sum();
+        let ops: usize = r.chunks.iter().map(|c| c.num_ops()).sum();
+        let load = match load_ms.get() {
+            Some(ms) => format!(", loads in {ms:.0}ms"),
+            None => String::new(),
+        };
+        format!(
+            "{} chunks, {} bytes, {} changes, {} ops{load}",
+            fmt::count_exact(r.chunks.len()),
+            fmt::count_exact(r.len),
+            fmt::count_exact(changes),
+            fmt::count_exact(ops)
+        )
+    })
+}
+
 /// The open file's three views, as labelled folder tabs over one body.
 #[component]
 fn Folder() -> impl IntoView {
@@ -165,6 +187,22 @@ fn Folder() -> impl IntoView {
         (Tab::Save, "t-save", "Save", "What doc.save() writes for this document"),
     ];
     let color = move || tabs.iter().find(|t| t.0 == app.tab.get()).map_or("", |t| t.1);
+    let stats = move || match app.tab.get() {
+        Tab::Load => file_stats(app.file, app.load_ms.0),
+        Tab::Save => file_stats(app.saved, app.load_ms.1),
+        Tab::Document => app.model.with(|m| match m.as_deref() {
+            Some(Ok(m)) => {
+                let ops: u64 = m.changes.iter().map(|c| c.num_ops()).sum();
+                format!(
+                    "{} ops, {} changes, {} actors",
+                    fmt::count_exact(ops as usize),
+                    fmt::count_exact(m.changes.len()),
+                    fmt::count_exact(m.actors.len())
+                )
+            }
+            _ => String::new(),
+        }),
+    };
     view! {
         <div class="folder">
             <nav class="folder-tabs">
@@ -172,6 +210,7 @@ fn Folder() -> impl IntoView {
                     <button class=color class:active=move || app.tab.get() == tab title=title
                         on:click=move |_| app.tab.set(tab)>{label}</button>
                 })}
+                <div class="folder-stats">{stats}</div>
             </nav>
             <div class=move || format!("folder-body {}", color())>
                 {move || match app.tab.get() {

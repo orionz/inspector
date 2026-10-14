@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use am_inspect::{parse_file, DocModel, FileReport};
-use automerge::ChangeHash;
+use automerge::{Automerge, ChangeHash, LoadOptions, OnPartialLoad};
 use leptos::prelude::*;
 
 pub struct Loaded {
@@ -39,6 +39,8 @@ pub struct AppState {
     pub file: Local<Option<Rc<Loaded>>>,
     /// What `doc.save()` writes for the loaded document.
     pub saved: Local<Option<Rc<Loaded>>>,
+    /// How long automerge takes to load the file and the saved file, in ms.
+    pub load_ms: (RwSignal<Option<f64>>, RwSignal<Option<f64>>),
     /// The Save tab's chunk selection, kept apart from the Load tab's.
     pub saved_sel: (RwSignal<Option<usize>>, RwSignal<Option<ColumnRef>>, RwSignal<(GroupView, GroupView)>),
     pub model: Local<Option<Rc<Result<DocModel, String>>>>,
@@ -57,6 +59,7 @@ impl AppState {
         let state = Self {
             file: RwSignal::new_local(None),
             saved: RwSignal::new_local(None),
+            load_ms: (RwSignal::new(None), RwSignal::new(None)),
             saved_sel: (
                 RwSignal::new(None),
                 RwSignal::new(None),
@@ -92,6 +95,8 @@ impl AppState {
         self.status.set(None);
         self.model.set(None);
         self.saved.set(None);
+        self.load_ms.0.set(None);
+        self.load_ms.1.set(None);
         self.file.set(None);
     }
 
@@ -111,18 +116,30 @@ impl AppState {
                     .set((GroupView::Columns, GroupView::Columns));
                 self.model.set(None);
                 self.saved.set(None);
+                self.load_ms.0.set(None);
+                self.load_ms.1.set(None);
                 self.file.set(Some(Rc::new(Loaded { name, bytes, report })));
                 self.status.set(Some("Loading document history…".into()));
                 set_timeout(
                     move || {
-                        let model = self
-                            .file
-                            .with_untracked(|f| f.as_ref().map(|f| DocModel::load(&f.bytes)));
+                        let model = self.file.with_untracked(|f| {
+                            let f = f.as_ref()?;
+                            let (doc, ms) = timed(|| {
+                                Automerge::load_with_options(
+                                    &f.bytes,
+                                    LoadOptions::new().on_partial_load(OnPartialLoad::Ignore),
+                                )
+                            });
+                            self.load_ms.0.set(Some(ms));
+                            Some(doc.map(DocModel::from_doc).map_err(|e| e.to_string()))
+                        });
                         if let Some(model) = model {
                             let n = model.as_ref().map(|m| m.changes.len()).unwrap_or(0);
                             let saved = model.as_ref().ok().map(|m| {
                                 let bytes = m.doc.save();
                                 let report = parse_file(&bytes);
+                                let (_, ms) = timed(|| Automerge::load(&bytes));
+                                self.load_ms.1.set(Some(ms));
                                 Rc::new(Loaded { name: "doc.save()".into(), bytes, report })
                             });
                             self.saved.set(saved);
@@ -137,6 +154,12 @@ impl AppState {
             Duration::from_millis(30),
         );
     }
+}
+
+fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {
+    let start = js_sys::Date::now();
+    let out = f();
+    (out, js_sys::Date::now() - start)
 }
 
 /// A single-entry memo for expensive derived data that isn't `Send`.
