@@ -596,6 +596,12 @@ impl fmt::Display for Value {
     }
 }
 
+/// Bytes as a slice of hex, e.g. `[]` or `[de ad]`.
+pub fn slice_hex(b: &[u8]) -> String {
+    let hex: Vec<String> = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("[{}]", hex.join(" "))
+}
+
 pub fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -924,6 +930,7 @@ impl Field {
                 };
                 let (start, end) = (offsets[row], offsets[row + 1]);
                 match raw.get(start..end) {
+                    Some(bytes) if self.name == "extra" => slice_hex(bytes),
                     Some(bytes) => decode_value(m & 0xf, bytes).to_string(),
                     None => "<value out of range>".into(),
                 }

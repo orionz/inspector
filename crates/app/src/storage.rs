@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use am_inspect::chunk::{Chunk, DepOrder, SectionKind};
 use am_inspect::columns::{
-    build_rows, decode_runs, decode_value, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
+    build_rows, decode_runs, decode_value, slice_hex, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
     RunKind, RowTable,
 };
 use am_inspect::format_time;
@@ -774,14 +774,19 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
     }
 }
 
-fn pager(page: RwSignal<usize>, pages: usize, total: usize, unit: &'static str) -> impl IntoView {
+fn pager(
+    page: RwSignal<usize>,
+    pages: impl Fn() -> usize + Copy + Send + Sync + 'static,
+    total: usize,
+    unit: &'static str,
+) -> impl IntoView {
     view! {
         <div class="pager">
             <button disabled=move || page.get() == 0 on:click=move |_| page.set(0)>"«"</button>
             <button disabled=move || page.get() == 0 on:click=move |_| page.update(|p| *p = p.saturating_sub(1))>"‹"</button>
-            <span>{move || format!("page {} / {} · {} {unit}", page.get() + 1, pages.max(1), fmt::count(total))}</span>
-            <button disabled=move || { page.get() + 1 >= pages } on:click=move |_| page.update(|p| *p += 1)>"›"</button>
-            <button disabled=move || { page.get() + 1 >= pages } on:click=move |_| page.set(pages.saturating_sub(1))>"»"</button>
+            <span>{move || format!("page {} / {} · {} {unit}", page.get() + 1, pages().max(1), fmt::count(total))}</span>
+            <button disabled=move || { page.get() + 1 >= pages() } on:click=move |_| page.update(|p| *p += 1)>"›"</button>
+            <button disabled=move || { page.get() + 1 >= pages() } on:click=move |_| page.set(pages().saturating_sub(1))>"»"</button>
         </div>
     }
 }
@@ -803,7 +808,7 @@ fn RowsView(ops: bool) -> impl IntoView {
         let t = StoredValue::new_local(table.clone());
         let actors = with_chunk(app, |_, c| c.facts.actors.clone()).unwrap_or_default();
         Some(view! {
-            {pager(page, pages, table.rows, "rows")}
+            {pager(page, move || pages, table.rows, "rows")}
             <div class="rows-wrap">
                 <table class="dense rows mono">
                     <thead><tr>
@@ -832,6 +837,8 @@ fn RowsView(ops: bool) -> impl IntoView {
 
 const RUNS_PAGE: usize = 100;
 const RAW_HEX_MAX: usize = 48;
+const RUN_ROW_H: f64 = 22.0;
+const FIT_MARGIN: f64 = 40.0;
 
 fn fmt_cell(col: &ColumnInfo, c: &Cell, actors: &[String]) -> String {
     match (col.col_type(), c) {
@@ -866,7 +873,8 @@ struct RunLine {
 /// A column cut into the lines of its run table, with the row each line starts at.
 enum ColLines {
     Runs { col: ColumnInfo, runs: DecodedRuns, line_rows: Vec<usize>, run_first_line: Vec<usize> },
-    Raw { col: ColumnInfo, lines: Vec<(std::ops::Range<usize>, std::ops::Range<usize>, u64)>, line_rows: Vec<usize> },
+    /// value.raw split by row; `decoded` shows each row's materialized value instead of its bytes.
+    Raw { col: ColumnInfo, lines: Vec<(std::ops::Range<usize>, std::ops::Range<usize>, u64)>, line_rows: Vec<usize>, decoded: bool },
 }
 
 impl ColLines {
@@ -905,7 +913,7 @@ impl ColLines {
             }
         }
         let line_rows = lines.iter().map(|l| l.0.start).collect();
-        ColLines::Raw { col, lines, line_rows }
+        ColLines::Raw { col, lines, line_rows, decoded: false }
     }
 
     fn col(&self) -> &ColumnInfo {
@@ -933,15 +941,17 @@ impl ColLines {
         let last = self.line_rows().partition_point(|&r| r < rows.end);
         let mut out = Vec::with_capacity(last.saturating_sub(first));
         match self {
-            ColLines::Raw { col, lines, .. } => {
+            ColLines::Raw { col, lines, decoded, .. } => {
                 for (r, b, code) in &lines[first..last.min(lines.len())] {
                     let bytes = col.data.get(b.clone()).unwrap_or_default();
-                    out.push(RunLine {
-                        kind: RunKind::Raw,
-                        rows: r.clone(),
-                        value: hex_spaced(bytes),
-                        title: format!("{} · {} bytes", decode_value(*code, bytes), b.len()),
-                    });
+                    let value = if col.name.starts_with("extra") { slice_hex(bytes) } else { decode_value(*code, bytes).to_string() };
+                    let hex = hex_spaced(bytes);
+                    let (value, title) = match (*decoded, r.len()) {
+                        (true, 1) => (value, format!("{} bytes: {hex}", b.len())),
+                        (true, n) => (format!("{n} × {value}"), format!("{} bytes: {hex}", b.len())),
+                        (false, _) => (hex, format!("{value} · {} bytes", b.len())),
+                    };
+                    out.push(RunLine { kind: RunKind::Raw, rows: r.clone(), value, title });
                 }
             }
             ColLines::Runs { col, runs, run_first_line, .. } => {
@@ -1030,7 +1040,12 @@ fn RunPanel() -> impl IntoView {
                             ColLines::Runs { col, runs, .. } if col.col_type() == ColType::ValueMetadata => Some(runs.clone()),
                             _ => None,
                         });
-                        out.push(ColLines::raw(col, &meta.unwrap_or(DecodedRuns { runs: vec![], stats: Default::default(), error: None })));
+                        let raw = ColLines::raw(col, &meta.unwrap_or(DecodedRuns { runs: vec![], stats: Default::default(), error: None }));
+                        if let ColLines::Raw { col, lines, line_rows, .. } = &raw {
+                            let materialized = ColLines::Raw { col: col.clone(), lines: lines.clone(), line_rows: line_rows.clone(), decoded: true };
+                            out.push(raw);
+                            out.push(materialized);
+                        }
                     } else {
                         out.push(ColLines::runs(col));
                     }
@@ -1044,64 +1059,19 @@ fn RunPanel() -> impl IntoView {
             (0..cols.len()).partition(|&i| cols[i].col().col_type() == ColType::Group);
         Some(view! {
             <div class="card runs">
-                {cols.iter().enumerate().map(|(i, l)| col_summary(app, l, i == 0)).collect_view()}
-                {[counts, items].into_iter().filter(|s| !s.is_empty()).map(|set| {
-                    view! { <RunTable cols=cols.clone() set=set actors=actors.clone()/> }
-                }).collect_view()}
+                <button class="link runs-close" on:click=move |_| app.column.set(None)>"close ✕"</button>
+                <div class="run-tables">
+                    {[counts, items].into_iter().filter(|s| !s.is_empty()).map(|set| {
+                        view! { <RunTable cols=cols.clone() set=set actors=actors.clone()/> }
+                    }).collect_view()}
+                </div>
             </div>
         })
     }
 }
 
-fn col_summary(app: AppState, lines: &ColLines, close: bool) -> impl IntoView {
-    let col = lines.col();
-    let ty = col.col_type().short();
-    let stats = match lines {
-        ColLines::Runs { runs, .. } => Some(runs.stats.clone()),
-        ColLines::Raw { .. } => None,
-    };
-    let error = match lines {
-        ColLines::Runs { runs, .. } => runs.error.clone(),
-        ColLines::Raw { .. } => None,
-    };
-    let len = col.data.len().max(1);
-    view! {
-        <div class="card-title">
-            <b class="mono">{col.name.clone()}</b>
-            <span class=format!("tchip t-{ty}")>{ty}</span>
-            <span>{format!("{} stored", fmt::bytes(col.stored_len))}</span>
-            {col.deflated().then(|| view! { <span class="dim">{format!("{} inflated ({:.1}× deflate)", fmt::bytes(col.data.len()), col.data.len() as f64 / col.stored_len.max(1) as f64)}</span> })}
-            {stats.clone().map(|s| view! {
-                <span>{format!("{} rows", fmt::count(s.rows))}</span>
-                <span>{format!("{} runs", fmt::count(s.runs))}</span>
-                <span class="dim">{format!("{} rows/run", fmt::per_row(s.rows, s.runs))}</span>
-            })}
-            <span class="spacer"></span>
-            {close.then(|| view! { <button class="link" on:click=move |_| app.column.set(None)>"close ✕"</button> })}
-        </div>
-        {error.map(|e| view! { <div class="error">{e}</div> })}
-        {stats.map(|s| {
-            let split = [
-                ("repeat", s.repeat_bytes, s.repeat_rows),
-                ("literal", s.literal_bytes, s.literal_rows),
-                ("null", s.null_bytes, s.null_rows),
-            ];
-            view! {
-                <div class="split">
-                    {split.into_iter().filter(|(_, b, _)| *b > 0).map(|(k, b, r)| view! {
-                        <div class=format!("seg r-{k}") style:flex-grow=b.to_string()
-                            title=format!("{k}: {b} bytes for {r} rows")>
-                            {format!("{k} {} · {} rows", fmt::pct(b, len), fmt::pct(r, s.rows))}
-                        </div>
-                    }).collect_view()}
-                </div>
-            }
-        })}
-    }
-}
-
 /// Columns that share row numbers, side by side: the first column splits the
-/// rows wherever any of their runs starts.
+/// rows wherever any of their runs starts. Pages are sized to fit the window.
 #[component]
 fn RunTable(cols: Rc<Vec<ColLines>>, set: Vec<usize>, actors: Vec<String>) -> impl IntoView {
     let total = set.iter().map(|&i| cols[i].rows()).max().unwrap_or(0);
@@ -1111,12 +1081,61 @@ fn RunTable(cols: Rc<Vec<ColLines>>, set: Vec<usize>, actors: Vec<String>) -> im
     bounds.dedup();
     let segments = bounds.len().saturating_sub(1);
     let page = RwSignal::new(0usize);
+    let page_size = RwSignal::new(RUNS_PAGE);
+    let body_el = NodeRef::<leptos::html::Tbody>::new();
+    fn fit(body_el: NodeRef<leptos::html::Tbody>, page: RwSignal<usize>, page_size: RwSignal<usize>, tries: u8) {
+        let Some(Some(tbody)) = body_el.try_get_untracked() else { return };
+        let w = window();
+        let r = tbody.get_bounding_client_rect();
+        let shown = tbody.child_element_count();
+        let row_h = if shown > 0 { r.height() / shown as f64 } else { RUN_ROW_H };
+        let height = w.inner_height().ok().and_then(|h| h.as_f64()).unwrap_or(800.0);
+        let top = r.top() + w.scroll_y().unwrap_or(0.0);
+        let rows = ((height - top - FIT_MARGIN) / row_h).floor().max(5.0) as usize;
+        if page_size.get_untracked() != rows {
+            let first = page.get_untracked() * page_size.get_untracked();
+            page_size.set(rows);
+            page.set(first / rows);
+            if tries > 0 {
+                request_animation_frame(move || fit(body_el, page, page_size, tries - 1));
+            }
+        }
+    }
+    request_animation_frame(move || fit(body_el, page, page_size, 2));
+    let resize = window_event_listener(leptos::ev::resize, move |_| fit(body_el, page, page_size, 2));
+    on_cleanup(move || resize.remove());
+    let pages = move || segments.div_ceil(page_size.get().max(1));
     let bounds = StoredValue::new(bounds);
     let cols = StoredValue::new_local(cols);
-    let heads: Vec<String> = set.iter().map(|&i| cols.with_value(|c| c[i].col().name.clone())).collect();
+    let heads = cols.with_value(|cols| {
+        set.iter()
+            .map(|&i| {
+                let col = cols[i].col();
+                if matches!(cols[i], ColLines::Raw { decoded: true, .. }) {
+                    let base = col.name.split('.').next().unwrap_or_default().to_string();
+                    let title = format!("each row's value, read from {base}.meta and {base}.raw together");
+                    return view! {
+                        <th class="colhead materialized" title=title><b>{base}</b><span>"materialized"</span></th>
+                    }.into_any();
+                }
+                let title = format!(
+                    "{} · {}{}",
+                    col.col_type().short(),
+                    fmt::bytes(col.stored_len),
+                    if col.deflated() { format!(", {} inflated", fmt::bytes(col.data.len())) } else { String::new() }
+                );
+                view! {
+                    <th class="colhead" style=format!("--cc: var(--t-{})", col.col_type().short()) title=title>
+                        <b>{col.name.clone()}</b>
+                        <span>{format!("{} bytes, {} segments", fmt::count_exact(col.stored_len), fmt::count_exact(cols[i].line_rows().len()))}</span>
+                    </th>
+                }.into_any()
+            })
+            .collect_view()
+    });
     let body = move || {
-        let p = page.get();
-        let (s0, s1) = (p * RUNS_PAGE, ((p + 1) * RUNS_PAGE).min(segments));
+        let (p, size) = (page.get(), page_size.get());
+        let (s0, s1) = ((p * size).min(segments), ((p + 1) * size).min(segments));
         let segs: Vec<std::ops::Range<usize>> = bounds.with_value(|b| (s0..s1).map(|k| b[k]..b[k + 1]).collect());
         let Some(rows) = segs.first().zip(segs.last()).map(|(a, b)| a.start..b.end) else {
             return vec![];
@@ -1135,7 +1154,7 @@ fn RunTable(cols: Rc<Vec<ColLines>>, set: Vec<usize>, actors: Vec<String>) -> im
         });
         grid.into_iter().zip(segs).map(|(cells, seg)| view! {
             <tr>
-                <td class="num dim seg">{if seg.len() == 1 { seg.start.to_string() } else { format!("{}..{}", seg.start, seg.end) }}</td>
+                <td class="seg">{if seg.len() == 1 { seg.start.to_string() } else { format!("{}..{}", seg.start, seg.end) }}</td>
                 {cells.into_iter().flatten().map(|(l, span)| view! {
                     <td class=format!("val rk-{}", l.kind.label()) rowspan=span title=l.title>{l.value}</td>
                 }).collect_view()}
@@ -1143,10 +1162,15 @@ fn RunTable(cols: Rc<Vec<ColLines>>, set: Vec<usize>, actors: Vec<String>) -> im
         }).collect::<Vec<_>>()
     };
     view! {
-        {pager(page, segments.div_ceil(RUNS_PAGE), segments, "row ranges")}
-        <table class="dense mono runs-table">
-            <thead><tr><th class="num">"rows"</th>{heads.into_iter().map(|h| view! { <th>{h}</th> }).collect_view()}</tr></thead>
-            <tbody>{body}</tbody>
-        </table>
+        <div class="run-table">
+            <div class="run-table-top">
+                <b>{format!("{} rows", fmt::count_exact(total))}</b>
+                {pager(page, pages, segments, "row ranges")}
+            </div>
+            <table class="dense mono runs-table">
+                <thead><tr><th class="colhead rows-head"><b>"rows"</b></th>{heads}</tr></thead>
+                <tbody node_ref=body_el>{body}</tbody>
+            </table>
+        </div>
     }
 }

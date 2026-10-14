@@ -18,9 +18,9 @@ The three views sit on folder tabs above the file area.
   behind it. Changes whose dependencies
   only appear later in the file are orange; changes with a dependency missing
   from the file entirely (so they can't apply) are red.
-- Clicking a chunk shows its header facts (actors, heads, deps,
+- Clicking a chunk shows one card with its header facts (actors, heads, deps,
   seq/time/message, change-set fragment prefix counts, checksum) with a
-  byte-layout bar of the whole chunk, and its parts below: Changes and Ops
+  byte-layout bar of the whole chunk, and its parts inside it: Changes and Ops
   (row count and bytes), and Extra when a change carries bytes after its
   columns. Clicking a part opens its detail and shrinks the parts into a
   second band beside the chunk band. In any band, click another chunk, part
@@ -30,7 +30,8 @@ The three views sit on folder tabs above the file area.
   - **Physical**: the columns side by side, coloured by type, hanging from
     their names with length proportional to stored bytes (hover for share of
     group/file and bytes per row)
-  - **Logical**: the columns recombined into rows: id first, op ids as
+  - **Logical**: the columns recombined into rows (change `extra` bytes as
+    a hex slice, `[]` or `[01 05 …]`): id first, op ids as
     `ctr@abcd` with the actor's first four hex digits, `ROOT` for the root
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
@@ -41,12 +42,14 @@ The three views sit on folder tabs above the file area.
   (each sized by its bytes), hides the Physical / Logical tabs, and opens the
   field's runs beside it; click another column in the band to switch, or the
   open one to go back.
-- The runs view gives each column's repeat / literal / null byte split, then
-  one table: row ranges first, split wherever any column's run changes, and a
-  column per encoded column where each run is one cell spanning its rows
-  (`604 × 2`, `7 × null`, or one cell per literal value; deltas show their
-  absolute values). `value.raw` shows each row's bytes in hex beside its
-  metadata. Hover a cell for its encoded bytes.
+- The runs view is one table, paged to fit the window: the row count on top,
+  row ranges first (split wherever any column's run changes), then a column
+  per encoded column, headed by its name in its type's colour with its bytes
+  and segment count. Each run is one cell spanning its rows (`604 × 2`,
+  `7 × null`, or one cell per literal value; deltas show their absolute
+  values). `value.raw` shows each row's bytes in hex, followed by the
+  materialized value read from meta and raw together. Hover a cell for its
+  encoded bytes.
 
 **Document tab**
 - The document as a lazy, collapsible tree of its maps, lists and text. Each
