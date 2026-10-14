@@ -171,6 +171,10 @@ fn chunk_stats(c: &Chunk, file_len: usize) -> String {
 
 /// Gap between stack items; matches `.stack { gap }`.
 const STACK_GAP: f64 = 2.0;
+/// Smallest zoomed panel; panels for taller blocks grow to the block's
+/// height times `DECK_GROW`.
+const DECK_MIN_H: f64 = 56.0;
+const DECK_GROW: f64 = 1.1;
 /// How many neighbouring panels are kept either side of the hovered chunk.
 const DECK_REACH: usize = 2;
 
@@ -236,7 +240,7 @@ fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
     }
 }
 
-/// The file as a vertical stack of chunks. Hovering zooms out a panel for
+/// The file as a vertical stack of chunks. Hovering zooms out a panel over
 /// the chunk under the cursor, with its neighbours half-sized behind it;
 /// clicking opens that chunk. Once a chunk is open the stack shrinks into a
 /// band at the left, and clicking the band closes the chunk.
@@ -248,6 +252,7 @@ fn ChunkStack() -> impl IntoView {
     let cards = StoredValue::new(Vec::<ChunkCard>::new());
     let hovered = RwSignal::new(None::<usize>);
     let anchor = RwSignal::new(0.0);
+    let zoom_h = RwSignal::new(DECK_MIN_H);
     let items = move || {
         app.file.with(|f| {
             let f = f.as_ref()?;
@@ -298,7 +303,8 @@ fn ChunkStack() -> impl IntoView {
             }
             let k = rows.partition_point(|r| r.top <= y).saturating_sub(1);
             let r = &rows[k];
-            anchor.set(if r.band { (r.top + r.bottom) / 2.0 } else { y.clamp(r.top, r.bottom) });
+            anchor.set((r.top + r.bottom) / 2.0);
+            zoom_h.set(if r.band { DECK_MIN_H } else { (r.bottom - r.top) * DECK_GROW }.max(DECK_MIN_H));
             if hovered.get_untracked() != Some(k) {
                 hovered.set(Some(k));
             }
@@ -352,7 +358,8 @@ fn ChunkStack() -> impl IntoView {
                     }
                 }>
                 {items}
-                <div class="deck" style:top=move || format!("{}px", anchor.get())>
+                <div class="deck" style:top=move || format!("{}px", anchor.get())
+                    style:--zh=move || zoom_h.get().to_string()>
                     <For each=deck key=|k| *k children=panel/>
                 </div>
             </div>

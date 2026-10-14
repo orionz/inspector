@@ -174,9 +174,9 @@ tr.sel, .change-row.sel { background: var(--sel); }
 
 /* The hover deck: the chunk under the cursor zoomed out past the column,
    its neighbours half-height behind it. */
-.deck { --ease: cubic-bezier(.22, .8, .24, 1); position: absolute; left: 0; right: 0; height: 0; pointer-events: none; transition: top .24s var(--ease); }
+.deck { --ease: cubic-bezier(.22, .8, .24, 1); --zh: 56; position: absolute; left: 0; right: 0; height: 0; pointer-events: none; transition: top .24s var(--ease); }
 .deck-panel {
-  position: absolute; left: -20px; right: -20px; top: -28px; height: 56px; z-index: 3; overflow: hidden;
+  position: absolute; left: -20px; right: -20px; top: calc(var(--zh) * -.5px); height: calc(var(--zh) * 1px); z-index: 3; overflow: hidden;
   display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 0 12px;
   border-left: 4px solid var(--kc); border-radius: 8px;
   background: color-mix(in srgb, var(--kc) 22%, var(--panel));
@@ -188,12 +188,12 @@ tr.sel, .change-row.sel { background: var(--sel); }
 }
 @keyframes deck-in { from { opacity: 0; } }
 .deck-panel.before, .deck-panel.after { height: 26px; left: 14px; right: 14px; z-index: 2; opacity: .8; justify-content: flex-start; padding-top: 5px; box-shadow: 0 0 0 1px var(--line); }
-.deck-panel.before { top: -50px; justify-content: flex-end; padding: 0 12px 5px; }
-.deck-panel.after { top: 24px; }
+.deck-panel.before { top: calc(var(--zh) * -.5px - 22px); justify-content: flex-end; padding: 0 12px 5px; }
+.deck-panel.after { top: calc(var(--zh) * .5px - 4px); }
 .deck-panel.before .deck-line + .deck-line, .deck-panel.after .deck-line + .deck-line { display: none; }
 .deck-panel.before2, .deck-panel.after2 { height: 0; left: 40px; right: 40px; z-index: 1; opacity: 0; padding: 0 12px; box-shadow: none; }
-.deck-panel.before2 { top: -50px; }
-.deck-panel.after2 { top: 50px; }
+.deck-panel.before2 { top: calc(var(--zh) * -.5px - 22px); }
+.deck-panel.after2 { top: calc(var(--zh) * .5px + 22px); }
 .deck-line { display: flex; gap: 8px; align-items: center; overflow: hidden; text-overflow: ellipsis; }
 .deck-panel .idx { color: var(--dim); font-family: var(--mono); font-size: 11px; min-width: 4ch; }
 
