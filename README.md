@@ -35,8 +35,9 @@ The three views sit on folder tabs above the file area.
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
-- Columns that share an id (`obj.actor` + `obj.ctr`, `value.meta` +
-  `value.raw`, …) highlight and open together. Clicking one shrinks the
+- Columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
+  `key.ctr`, `value.meta` + `value.raw`, …) highlight and open together;
+  `key.str` stands alone. Clicking one shrinks the
   columns into a third band (each sized by its bytes) and opens their runs
   beside it, one over the other; click another column in the band to
   switch, or the open one to go back. The runs show the repeat / literal /

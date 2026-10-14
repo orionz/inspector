@@ -736,7 +736,7 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
             let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
             for (i, col) in g.columns.iter().enumerate() {
                 match spans.last_mut() {
-                    Some(r) if g.columns[r.start].spec.id() == col.spec.id() => r.end = i + 1,
+                    Some(r) if same_field(&g.columns[r.start], col) => r.end = i + 1,
                     _ => spans.push(i..i + 1),
                 }
             }
@@ -870,6 +870,12 @@ fn run_value(col: &ColumnInfo, run: &Run, actors: &[String]) -> String {
     s
 }
 
+/// Whether two columns encode the same field, e.g. an op id's actor and
+/// counter; a key's string stands apart from its element id.
+fn same_field(a: &ColumnInfo, b: &ColumnInfo) -> bool {
+    a.spec.id() == b.spec.id() && (a.col_type() == ColType::String) == (b.col_type() == ColType::String)
+}
+
 /// The runs of every column sharing the selected column's id, one card over another.
 #[component]
 fn RunPanel() -> impl IntoView {
@@ -878,8 +884,8 @@ fn RunPanel() -> impl IntoView {
         let sel = app.column.get()?;
         let span = with_chunk(app, |_, c| {
             let cols = &c.group(sel.ops)?.columns;
-            let id = cols.get(sel.index)?.spec.id();
-            Some(sel.index..sel.index + cols[sel.index..].iter().take_while(|c| c.spec.id() == id).count())
+            let first = cols.get(sel.index)?;
+            Some(sel.index..sel.index + cols[sel.index..].iter().take_while(|c| same_field(first, c)).count())
         })
         .flatten()?;
         Some(span.map(|index| view! { <RunCard col_ref=ColumnRef { ops: sel.ops, index }/> }).collect_view())
