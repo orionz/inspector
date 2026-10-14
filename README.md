@@ -36,10 +36,11 @@ The three views sit on folder tabs above the file area.
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
-- Physical has Grouped / Raw tabs over the columns. **Grouped** boxes the
-  columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
-  `key.ctr`, `value.meta` + `value.raw`, …; `key.str` stands alone), and they
-  highlight and open together into the runs view. **Raw** drops the boxes and
+- Physical has Grouped / Raw tabs over the columns. **Grouped** boxes each
+  field, naming the ones made of several columns (`Obj` = `obj.actor` +
+  `obj.ctr`, `ElemId` = `key.actor` + `key.ctr`, `Value` = `value.meta` +
+  `value.raw`, …; `key.str` stands alone); a field's columns highlight and
+  open together into the runs view. **Raw** drops the boxes and
   opens each column on its own to just its bytes as stored in the file (still
   deflated if the column is). Opening a column shrinks the columns into a
   third band (each sized by its bytes) beside the detail; click another

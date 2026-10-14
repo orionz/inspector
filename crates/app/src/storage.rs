@@ -732,15 +732,17 @@ fn ColumnStrip(ops: bool, grouped: bool) -> impl IntoView {
                 }
             }
             Some(view! {
-                <div class="col-strip">
+                <div class="col-strip" class:grouped=grouped>
                     {spans.into_iter().map(|span| {
                         let me = ColumnRef { ops, index: span.start };
-                        let multi = span.len() > 1;
+                        let label = (grouped && span.len() > 1).then(|| field_title(&g.columns[span.clone()]));
                         let bytes: usize = g.columns[span.clone()].iter().map(|c| c.stored_len.max(1)).sum();
                         view! {
-                            <div class="strip-group" class:multi=multi class:sel=move || app.column.get() == Some(me)
+                            <div class="strip-group" class:sel=move || app.column.get() == Some(me)
                                 style=format!("--b: {bytes}")
                                 on:click=move |_| app.column.update(|c| *c = (*c != Some(me)).then_some(me))>
+                                {grouped.then(|| view! { <span class="group-label">{label}</span> })}
+                                <div class="group-cols">
                     {g.columns[span].iter().map(|col| {
                         let ty = col.col_type().short();
                         let h = (STRIP_H * col.stored_len as f64 / max as f64).max(2.0);
@@ -765,6 +767,7 @@ fn ColumnStrip(ops: bool, grouped: bool) -> impl IntoView {
                             </button>
                         }
                     }).collect_view()}
+                                </div>
                             </div>
                         }
                     }).collect_view()}
@@ -1031,6 +1034,16 @@ fn RawColumn() -> impl IntoView {
                 <div class="hex raw-col">{hex}</div>
             </div>
         })
+    }
+}
+
+/// The name of a field made of several columns, e.g. `Obj` or `ElemId`.
+fn field_title(cols: &[ColumnInfo]) -> String {
+    let base = cols[0].name.split('.').next().unwrap_or_default();
+    match base {
+        "key" => "ElemId".into(),
+        "obj" | "id" | "succ" | "pred" | "value" | "deps" | "extra" => base[..1].to_uppercase() + &base[1..],
+        _ => base.to_string(),
     }
 }
 

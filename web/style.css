@@ -391,9 +391,11 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .side-tabs button.active { width: 38px; margin-left: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
 .col-strip { display: flex; gap: 8px; align-items: flex-start; overflow-x: auto; padding: 4px 4px 8px; }
 .strip-col { display: flex; flex-direction: column-reverse; justify-content: flex-end; align-items: center; width: 26px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
-.strip-group { display: flex; gap: 3px; align-items: flex-start; border-radius: 5px; cursor: pointer; }
+.strip-group { display: flex; flex-direction: column; border-radius: 5px; cursor: pointer; }
+.group-cols { display: flex; gap: 3px; align-items: flex-start; }
+.group-label { height: 20px; line-height: 20px; text-align: center; font-weight: 700; font-size: 12px; white-space: nowrap; }
 .strip-group:hover, .strip-group.sel { background: var(--sel); }
-.col-view:not(.open) .strip-group.multi { outline: 2px solid var(--dim); outline-offset: 1px; }
+.col-view:not(.open) .col-strip.grouped .strip-group { outline: 2px solid var(--dim); outline-offset: 1px; }
 .strip-tabs { display: flex; gap: 4px; padding: 0 10px; margin: 6px 0 12px; border-bottom: 2px solid #000; }
 .strip-tabs.hidden { display: none; }
 .strip-tabs button {
@@ -413,7 +415,9 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .col-view.open .col-detail { display: block; }
 .col-view.open .cols-wrap { flex: 0 0 40px; position: sticky; top: 56px; height: calc(100vh - 205px); }
 .col-view.open .col-strip { flex-direction: column; align-items: stretch; height: 100%; gap: 1px; padding: 0; overflow: hidden; }
-.col-view.open .strip-group { flex-direction: column; align-items: stretch; flex: var(--b) 1 0; min-height: 3px; gap: 1px; border-radius: 3px; overflow: hidden; }
+.col-view.open .strip-group { flex: var(--b) 1 0; min-height: 3px; border-radius: 3px; overflow: hidden; }
+.col-view.open .group-label { display: none; }
+.col-view.open .group-cols { flex: 1; min-height: 0; flex-direction: column; align-items: stretch; gap: 1px; }
 .col-view.open .strip-group:hover, .col-view.open .strip-group.sel { background: none; }
 .col-view.open .strip-group.sel { outline: 2px solid var(--text); outline-offset: -2px; }
 .col-view.open .strip-col {
