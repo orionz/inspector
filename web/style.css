@@ -244,15 +244,12 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .stack-title.placed { opacity: 1; }
 .more { display: block; margin: 6px auto; }
 
-.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 14px; margin-bottom: 10px; }
-.fact { display: flex; gap: 8px; min-width: 0; align-items: baseline; }
-.fact .k { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
-.fact .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.layout-bar { display: flex; height: 18px; gap: 1px; border-radius: 5px; overflow: hidden; background: var(--line); }
-.layout-bar .seg { min-width: 2px; }
-.layout-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12px; }
-.legend-item { white-space: nowrap; }
-.swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.hdr { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 4px 0 0; }
+.hdr dt { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.hdr dd { margin: 0; min-width: 0; }
+.id-list { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 1.6; }
+.id-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.id-list li .dim { display: inline-block; min-width: 3ch; }
 
 .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; align-items: start; }
 .group .seg-tabs { display: flex; gap: 2px; background: var(--panel-2); border-radius: 7px; padding: 2px; }

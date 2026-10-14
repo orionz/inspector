@@ -18,9 +18,9 @@ The three views sit on folder tabs above the file area.
   behind it. Changes whose dependencies
   only appear later in the file are orange; changes with a dependency missing
   from the file entirely (so they can't apply) are red.
-- Clicking a chunk shows one card with its header facts (actors, heads, deps,
-  seq/time/message, change-set fragment prefix counts, checksum) with a
-  byte-layout bar of the whole chunk, and its parts inside it: Changes and Ops
+- Clicking a chunk shows one card with its header (size, byte range,
+  checksum; seq/start op/time/message for a change; its actors, heads and
+  deps as full hex ids) and its parts inside it: Changes and Ops
   (row count and bytes), and Extra when a change carries bytes after its
   columns. Clicking a part opens its detail and shrinks the parts into a
   second band beside the chunk band. In any band, click another chunk, part

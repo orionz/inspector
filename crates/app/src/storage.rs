@@ -563,7 +563,7 @@ fn ChunkDetail() -> impl IntoView {
         <div class="chunk-view" class:open=move || app.part.get().is_some()>
             <div class="parts-wrap">
                 <div class="chunk-facts">
-                    {move || with_chunk(app, |f, c| view! { <ChunkFacts chunk=c.clone() file_len=f.report.len/> })}
+                    {move || with_chunk(app, |_, c| view! { <ChunkFacts chunk=c.clone()/> })}
                 </div>
                 <div class="parts">{blocks}</div>
             </div>
@@ -578,26 +578,33 @@ fn ChunkDetail() -> impl IntoView {
     }
 }
 
-fn fact(label: &'static str, value: impl IntoView) -> impl IntoView {
-    view! { <div class="fact"><span class="k">{label}</span><span class="v">{value}</span></div> }
-}
+const LIST_SHOWN: usize = 8;
 
-fn hash_list(hashes: &[String]) -> impl IntoView {
-    let title = hashes.join("\n");
-    let shown: Vec<String> = hashes.iter().take(3).map(|h| fmt::short(h, 8)).collect();
-    let more = hashes.len().saturating_sub(3);
+/// One hex id per line, numbered when `numbered`, with the rest behind a toggle past [`LIST_SHOWN`].
+fn id_list(ids: Vec<String>, numbered: bool) -> impl IntoView {
+    let all = RwSignal::new(false);
+    let more = ids.len().saturating_sub(LIST_SHOWN);
+    let ids = StoredValue::new(ids);
     view! {
-        <span class="mono" title=title>
-            {if hashes.is_empty() { "none".to_string() } else { shown.join(" ") }}
-            {(more > 0).then(|| format!(" +{more}"))}
-        </span>
+        <ul class="id-list mono">
+            {move || ids.with_value(|ids| {
+                let n = if all.get() { ids.len() } else { ids.len().min(LIST_SHOWN) };
+                ids[..n].iter().enumerate().map(|(i, id)| view! {
+                    <li>{numbered.then(|| view! { <span class="dim">{i}</span> })}{id.clone()}</li>
+                }).collect_view()
+            })}
+        </ul>
+        {(more > 0).then(|| view! {
+            <button class="link" on:click=move |_| all.update(|a| *a = !*a)>
+                {move || if all.get() { "show fewer".to_string() } else { format!("+{more} more") }}
+            </button>
+        })}
     }
 }
 
 #[component]
-fn ChunkFacts(chunk: Chunk, file_len: usize) -> impl IntoView {
+fn ChunkFacts(chunk: Chunk) -> impl IntoView {
     let c = chunk;
-    let total = c.len().max(1);
     let facts = &c.facts;
     let change = facts.change.clone();
     view! {
@@ -606,49 +613,30 @@ fn ChunkFacts(chunk: Chunk, file_len: usize) -> impl IntoView {
                 <span class=format!("chip k-{}", color_key(&c))>{c.kind.label()}</span>
                 <b>{format!("chunk #{}", c.index)}</b>
                 <span>{fmt::bytes(c.len())}</span>
-                <span class="dim">{format!("{} of file · bytes {}..{}", fmt::pct(c.len(), file_len), c.range.start, c.range.end)}</span>
-                <span class=if c.checksum_ok { "ok" } else { "bad" } title=format!("hash {}", c.hash_hex())>
+                <span class="dim">{format!("bytes {}..{}", c.range.start, c.range.end)}</span>
+                {c.inflated_len.map(|n| view! { <span class="dim">{format!("deflated from {}", fmt::bytes(n))}</span> })}
+                <span class=if c.checksum_ok { "ok" } else { "bad" } title=format!("checksum {}\nhash {}", hex_bytes(&c.checksum), c.hash_hex())>
                     {if c.checksum_ok { "checksum ✓" } else { "checksum ✗" }}
-                    " " <span class="mono">{hex_bytes(&c.checksum)}</span>
                 </span>
             </div>
             {c.error.clone().map(|e| view! { <div class="error">{e}</div> })}
             {dep_warning(&c).map(|w| view! { <div class=format!("dep-warning k-{}", color_key(&c))>{format!("This change {w}.")}</div> })}
-            <div class="facts">
-                {fact("changes", fmt::count(c.num_changes()))}
-                {fact("ops", fmt::count(c.num_ops()))}
-                {fact("actors", view! { <span title=facts.actors.join("\n")>{facts.actors.len()}</span> })}
-                {(!facts.heads.is_empty()).then(|| fact("heads", hash_list(&facts.heads)))}
-                {(!facts.deps.is_empty() || change.is_some()).then(|| fact("deps", hash_list(&facts.deps)))}
-                {c.inflated_len.map(|n| fact("inflated", format!("{} ({:.1}×)", fmt::bytes(n), n as f64 / total as f64)))}
+            <dl class="hdr">
                 {change.map(|h| view! {
-                    {fact("actor", view! { <span class="mono" title=h.actor.clone()>{fmt::short(&h.actor, 12)}</span> })}
-                    {fact("seq", h.seq)}
-                    {fact("start op", h.start_op)}
-                    {fact("time", format_time(h.time))}
-                    {fact("message", h.message.unwrap_or_default())}
+                    <dt>"change"</dt>
+                    <dd>
+                        {format!("seq {} · start op {} · {}", h.seq, h.start_op, format_time(h.time))}
+                        {h.message.map(|m| view! { " · " <i>{format!("“{m}”")}</i> })}
+                    </dd>
                 })}
-                {(facts.extra_bytes > 0).then(|| fact("extra", fmt::bytes(facts.extra_bytes)))}
-                {(!facts.head_indexes.is_empty()).then(|| fact("head idx", format!("{:?}", facts.head_indexes)))}
-                {facts.change_set_prefix.iter().map(|(k, n)| fact(k, *n)).collect_view()}
-            </div>
-            <div class="layout-bar">
-                {c.sections.iter().map(|s| view! {
-                    <div class=format!("seg s-{}", s.kind.key())
-                        style:flex-grow=s.len().to_string()
-                        title=format!("{} · {} · {}", s.label, fmt::bytes(s.len()), fmt::pct(s.len(), total))></div>
-                }).collect_view()}
-            </div>
-            <div class="layout-legend">
-                {c.sections.iter().map(|s| view! {
-                    <span class="legend-item">
-                        <i class=format!("swatch s-{}", s.kind.key())></i>
-                        {s.label.clone()} " "
-                        <b>{fmt::bytes(s.len())}</b>
-                        <span class="dim">" " {fmt::pct(s.len(), total)}</span>
-                    </span>
-                }).collect_view()}
-            </div>
+                <dt>"actors"</dt>
+                <dd>{id_list(facts.actors.clone(), true)}</dd>
+                {(!facts.heads.is_empty()).then(|| view! { <dt>"heads"</dt><dd>{id_list(facts.heads.clone(), false)}</dd> })}
+                {(facts.change.is_some() || !facts.deps.is_empty()).then(|| view! {
+                    <dt>"deps"</dt>
+                    <dd>{if facts.deps.is_empty() { view! { <span class="dim">"none"</span> }.into_any() } else { id_list(facts.deps.clone(), false).into_any() }}</dd>
+                })}
+            </dl>
         </div>
     }
 }
