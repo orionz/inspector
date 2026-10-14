@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Range;
 
 use sha2::{Digest, Sha256};
@@ -120,6 +121,18 @@ pub struct ChangeHeader {
     pub other_actors: Vec<String>,
 }
 
+/// Where a change chunk's dependencies sit relative to it in the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum DepOrder {
+    /// Every dependency appears earlier in the file (or there are none).
+    #[default]
+    InOrder,
+    /// Some dependency only appears later in the file.
+    Late,
+    /// Some dependency appears nowhere in the file, so the change can't apply.
+    Missing,
+}
+
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub index: usize,
@@ -135,6 +148,8 @@ pub struct Chunk {
     /// Bytes of the inflated body, for compressed chunks.
     pub inflated_len: Option<usize>,
     pub error: Option<String>,
+    /// Change and compressed change chunks only.
+    pub dep_order: DepOrder,
 }
 
 impl Chunk {
@@ -201,10 +216,48 @@ pub fn parse_file(bytes: &[u8]) -> FileReport {
             }
         }
     }
+    mark_dep_order(bytes, &mut chunks);
     FileReport {
         len: bytes.len(),
         chunks,
         trailing,
+    }
+}
+
+fn is_change(c: &Chunk) -> bool {
+    matches!(c.kind, ChunkKind::Change | ChunkKind::Compressed) && c.error.is_none()
+}
+
+fn mark_dep_order(file: &[u8], chunks: &mut [Chunk]) {
+    let mut first_seen: HashMap<String, usize> = HashMap::new();
+    for c in chunks.iter().filter(|c| is_change(c)) {
+        first_seen.entry(c.hash_hex()).or_insert(c.index);
+    }
+    let unresolved = |seen: &HashMap<String, usize>, c: &Chunk| {
+        c.facts.deps.iter().any(|d| seen.get(d).is_none_or(|&j| j > c.index))
+    };
+    // Loading other chunk kinds means a full automerge parse, so only pay
+    // for it when some dependency isn't already found in an earlier change.
+    if chunks.iter().filter(|c| is_change(c)).any(|c| unresolved(&first_seen, c)) {
+        for c in chunks.iter().filter(|c| !is_change(c)) {
+            for change in crate::doc::chunk_changes(file, c).unwrap_or_default() {
+                let j = first_seen.entry(change.hash().to_string()).or_insert(c.index);
+                *j = (*j).min(c.index);
+            }
+        }
+    }
+    for c in chunks.iter_mut().filter(|c| is_change(c)) {
+        c.dep_order = c
+            .facts
+            .deps
+            .iter()
+            .map(|d| match first_seen.get(d) {
+                None => DepOrder::Missing,
+                Some(&j) if j > c.index => DepOrder::Late,
+                Some(_) => DepOrder::InOrder,
+            })
+            .max()
+            .unwrap_or_default();
     }
 }
 
@@ -242,6 +295,7 @@ fn parse_chunk(file: &[u8], start: usize, index: usize) -> Result<Chunk> {
         facts: ChunkFacts::default(),
         inflated_len: None,
         error: None,
+        dep_order: DepOrder::InOrder,
     };
     let result = match kind {
         ChunkKind::Document => parse_document(&mut chunk, body, body_start),
@@ -525,6 +579,8 @@ mod tests {
         let report = parse_file(&corpus("todo-save-plus-incrementals.automerge"));
         assert_eq!(report.chunks[0].kind, ChunkKind::Document);
         assert!(report.chunks[1..].iter().all(|c| c.kind == ChunkKind::Change));
+        let count = |o| report.chunks.iter().filter(|c| c.dep_order == o).count();
+        assert_eq!((count(DepOrder::Late), count(DepOrder::Missing)), (2, 2));
         let report = parse_file(&corpus("text-next-save-plus-incrementals.automerge"));
         assert!(report.chunks.iter().all(|c| c.kind == ChunkKind::ChangeSet));
     }

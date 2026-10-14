@@ -4,7 +4,7 @@ pub mod chunk;
 pub mod columns;
 pub mod leb;
 
-pub use chunk::{parse_file, Chunk, ChunkKind, FileReport, Section, SectionKind};
+pub use chunk::{parse_file, Chunk, ChunkKind, DepOrder, FileReport, Section, SectionKind};
 pub use columns::{ColumnGroup, ColumnInfo};
 pub mod doc;
 

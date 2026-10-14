@@ -13,7 +13,9 @@ in its history. Everything runs locally in the browser.
   of the file or smaller are drawn as 3px bands, one per chunk. Hovering
   anywhere zooms out a panel for the chunk under the cursor (bytes, share of
   file, changes, ops, time, actor, message) with its neighbours half-sized
-  behind it. Per-type totals sit above the stack.
+  behind it. Per-type totals sit above the stack. Changes whose dependencies
+  only appear later in the file are orange; changes with a dependency missing
+  from the file entirely (so they can't apply) are red.
 - Clicking a chunk opens its detail and shrinks the stack into a band on the
   left; clicking the band returns to the stack.
 - For the selected chunk: header facts (actors, heads, deps, seq/time/message,

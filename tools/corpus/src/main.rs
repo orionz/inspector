@@ -178,16 +178,40 @@ fn todo_save_plus_trickle() -> Vec<u8> {
         commit(&mut doc, minute, &format!("import {bulk} items"));
         minute += 1;
         out.extend(doc.save_incremental());
+        let mut held = None;
         for t in 0..trickle {
+            if t == 3 && trickle > 20 {
+                out.extend(orphan_change(&doc, minute));
+            }
             let len = doc.length(&items);
             let item = doc.get(&items, (t * 37) % len).unwrap().unwrap().1;
             doc.put(&item, "qty", minute).unwrap();
             commit(&mut doc, minute, "change quantity");
             minute += 1;
-            out.extend(doc.save_incremental());
+            let saved = doc.save_incremental();
+            match held.take() {
+                // written after the change that depends on it
+                Some(earlier) => out.extend(saved.into_iter().chain(earlier)),
+                None if t == 7 && trickle > 20 => held = Some(saved),
+                None => out.extend(saved),
+            }
         }
     }
     out
+}
+
+/// A change whose parent change is never written, so it can't be applied.
+fn orphan_change(doc: &AutoCommit, minute: i64) -> Vec<u8> {
+    let mut fork = doc
+        .clone()
+        .fork()
+        .with_actor(actor(&format!("lost-device-{minute}")))
+        .with_author(author("carol"));
+    fork.put(ROOT, "title", "Groceries (draft)").unwrap();
+    commit(&mut fork, minute, "draft title");
+    fork.put(ROOT, "title", "Groceries (final)").unwrap();
+    commit(&mut fork, minute, "final title");
+    fork.get_last_local_change().unwrap().raw_bytes().to_vec()
 }
 
 fn concat_changes(doc: &mut AutoCommit) -> Vec<u8> {

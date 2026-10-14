@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use am_inspect::chunk::{Chunk, ChunkKind};
+use am_inspect::chunk::{Chunk, ChunkKind, DepOrder};
 use am_inspect::columns::{
     build_rows, decode_runs, value_breakdown, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
     RunKind, RowTable,
@@ -220,6 +220,22 @@ struct ChunkCard {
     flagged: bool,
 }
 
+fn color_key(c: &Chunk) -> &'static str {
+    match c.dep_order {
+        DepOrder::InOrder => c.kind.key(),
+        DepOrder::Late => "late",
+        DepOrder::Missing => "missing",
+    }
+}
+
+fn dep_warning(c: &Chunk) -> Option<&'static str> {
+    match c.dep_order {
+        DepOrder::InOrder => None,
+        DepOrder::Late => Some("depends on a change later in the file"),
+        DepOrder::Missing => Some("depends on a change missing from the file; can't apply"),
+    }
+}
+
 fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
     let context = match &c.facts.change {
         Some(h) => format!(
@@ -230,9 +246,13 @@ fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
         ),
         None => format!("bytes {}..{}", c.range.start, c.range.end),
     };
+    let context = match dep_warning(c) {
+        Some(w) => format!("{w} · {context}"),
+        None => context,
+    };
     ChunkCard {
         index: c.index,
-        kind: c.kind.key(),
+        kind: color_key(c),
         label: c.kind.label(),
         stats: chunk_stats(c, file_len),
         context,
@@ -285,7 +305,7 @@ fn ChunkStack() -> impl IntoView {
                         let h = item.height().to_string();
                         match item {
                             StackItem::Block { index, .. } => view! {
-                                <div class=format!("blk k-{}", f.report.chunks[index].kind.key())
+                                <div class=format!("blk k-{}", color_key(&f.report.chunks[index]))
                                     class:sel=move || app.chunk.get() == Some(index)
                                     style:--h=h></div>
                             }
@@ -296,7 +316,7 @@ fn ChunkStack() -> impl IntoView {
                                     style:--h=h>
                                     <div class="band-stripes">
                                         {f.report.chunks[first..=last].iter()
-                                            .map(|c| view! { <i class=format!("k-{}", c.kind.key())></i> })
+                                            .map(|c| view! { <i class=format!("k-{}", color_key(c))></i> })
                                             .collect_view()}
                                     </div>
                                 </div>
@@ -473,7 +493,7 @@ fn ChunkFacts(chunk: Chunk, file_len: usize) -> impl IntoView {
     view! {
         <div class="card">
             <div class="card-title">
-                <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
+                <span class=format!("chip k-{}", color_key(&c))>{c.kind.label()}</span>
                 <b>{format!("chunk #{}", c.index)}</b>
                 <span>{fmt::bytes(c.len())}</span>
                 <span class="dim">{format!("{} of file · bytes {}..{}", fmt::pct(c.len(), file_len), c.range.start, c.range.end)}</span>
@@ -483,6 +503,7 @@ fn ChunkFacts(chunk: Chunk, file_len: usize) -> impl IntoView {
                 </span>
             </div>
             {c.error.clone().map(|e| view! { <div class="error">{e}</div> })}
+            {dep_warning(&c).map(|w| view! { <div class=format!("dep-warning k-{}", color_key(&c))>{format!("This change {w}.")}</div> })}
             <div class="facts">
                 {fact("changes", fmt::count(c.num_changes()))}
                 {fact("ops", fmt::count(c.num_ops()))}
