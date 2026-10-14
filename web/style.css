@@ -319,7 +319,7 @@ pre.hex { white-space: pre-wrap; word-break: break-all; background: var(--panel-
 .doc-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: 12px; align-items: start; }
 .doc-side { position: sticky; top: 56px; }
 .doc-view { display: flex; gap: 10px; align-items: flex-start; }
-.doc-level { flex: 1 1 0; min-width: 0; transition: flex .3s ease; }
+.doc-level { flex: 1 1 0; min-width: 0; }
 .doc-level.band { flex: 0 0 40px; position: sticky; top: 56px; height: calc(100vh - 140px); }
 .doc-band { position: relative; height: 100%; display: flex; flex-direction: column; gap: 1px; cursor: pointer; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
 .doc-stripe { flex: 1 1 0; min-height: 1px; background: var(--line); opacity: .7; }
@@ -333,6 +333,8 @@ pre.hex { white-space: pre-wrap; word-break: break-all; background: var(--panel-
   box-shadow: 0 0 0 1px var(--line); font-family: var(--mono); font-size: 12.5px; font-weight: 600;
 }
 .doc-pane { margin: 0; }
+.doc-pane.text-pane { min-height: calc(100vh - 140px); box-sizing: border-box; }
+.doc-pane pre.text { max-height: none; overflow: visible; }
 .doc-map { display: grid; grid-template-columns: max-content 1fr; gap: 3px 18px; font-size: 13px; align-items: baseline; }
 .doc-key { color: var(--dim); white-space: nowrap; }
 .doc-val { min-width: 0; overflow-wrap: anywhere; }

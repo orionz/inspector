@@ -25,6 +25,15 @@ pub enum GroupView {
     Raw,
 }
 
+/// What the document view shows for the open object.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DocMode {
+    /// Its current keys and values.
+    Value,
+    /// The ops that built it.
+    Ops,
+}
+
 /// An object opened in the document view, by the key that leads to it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Crumb {
@@ -77,6 +86,7 @@ pub struct AppState {
     pub heads: RwSignal<Option<Vec<ChangeHash>>>,
     /// Objects opened in the document view, from just below the root.
     pub doc_path: RwSignal<Vec<Crumb>>,
+    pub doc_mode: RwSignal<DocMode>,
 }
 
 impl AppState {
@@ -101,6 +111,7 @@ impl AppState {
             step: RwSignal::new(0),
             heads: RwSignal::new(None),
             doc_path: RwSignal::new(Vec::new()),
+            doc_mode: RwSignal::new(DocMode::Value),
         };
         Effect::new(move |_| {
             let step = state.step.get();

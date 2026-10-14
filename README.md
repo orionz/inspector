@@ -62,6 +62,9 @@ The three views sit on folder tabs above the file area.
   entries at the left and opens the object beside it. In a band, click
   another object to switch to it, or the open one (or the band) to go back
   to that level. Hover a value for the change that set it.
+- Value / Ops tabs on the right edge: **Ops** shows the open object's ops
+  instead of its value, as logical rows (id, key, insert, Action, pred) in op
+  id order. The first Ops view decodes every change in the document.
 
 **Save tab**
 - The Load tab's view of what `doc.save()` writes after loading the file

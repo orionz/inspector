@@ -4,7 +4,7 @@ use automerge::{ObjType, ROOT};
 use leptos::prelude::*;
 
 use crate::fmt;
-use crate::state::{AppState, Crumb};
+use crate::state::{AppState, Crumb, DocMode};
 
 fn with_model<R>(app: AppState, f: impl FnOnce(&DocModel) -> R) -> Option<R> {
     app.model.with(|m| match m.as_deref() {
@@ -30,7 +30,18 @@ pub fn DocumentTab() -> impl IntoView {
                 <div class="card error">"automerge could not load this file: " {e.clone()}</div>
             }
             .into_any(),
-            Some(Ok(_)) => view! { <DocBrowser/> }.into_any(),
+            Some(Ok(_)) => {
+                let tab = move |mode: DocMode, label: &'static str| view! {
+                    <button class:active=move || app.doc_mode.get() == mode on:click=move |_| app.doc_mode.set(mode)>
+                        <span>{label}</span>
+                    </button>
+                };
+                view! {
+                    <DocBrowser/>
+                    <nav class="side-tabs">{tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}</nav>
+                }
+                .into_any()
+            }
         })
     }
 }
@@ -97,6 +108,9 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 .into_any()
             });
         }
+        if app.doc_mode.get() == DocMode::Ops {
+            return Some(view! { <ObjOps obj=obj.clone() title=title.clone()/> }.into_any());
+        }
         with_model(app, |m| {
             let header = |len: usize| view! {
                 <div class="card-title"><b class="mono">{title.clone()}</b><span class="dim">{obj_label(ty, len)}</span></div>
@@ -107,7 +121,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 let marks = m.marks(&obj, heads);
                 let shown: String = text.chars().take(limit.get() * 40).collect();
                 return view! {
-                    <div class="card doc-pane">
+                    <div class="card doc-pane text-pane">
                         {header(chars)}
                         <pre class="text">{shown}{(chars > limit.get() * 40).then(|| "…")}</pre>
                         {(chars > limit.get() * 40).then(|| view! {
@@ -156,6 +170,54 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
         })
     };
     view! { <div class="doc-level" class:band=band>{body}</div> }
+}
+
+const OPS_PAGE: usize = 200;
+
+/// The ops whose object is `obj`, as logical rows.
+#[component]
+fn ObjOps(obj: automerge::ObjId, title: String) -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let page = RwSignal::new(0usize);
+    move || {
+        with_model(app, |m| {
+            let ops = m.object_ops(&obj);
+            let total = ops.len();
+            let first = (page.get() * OPS_PAGE).min(total);
+            let rows = ops[first..(first + OPS_PAGE).min(total)].iter().map(|op| {
+                let (_, origin) = origin_label(app, op.change);
+                view! {
+                    <tr title=origin>
+                        <td>{op.id.clone()}</td>
+                        <td>{op.key.clone()}</td>
+                        <td>{if op.insert { "t" } else { "f" }}</td>
+                        <td>{op.action.clone()}</td>
+                        <td>{op.pred.clone()}</td>
+                    </tr>
+                }
+            }).collect_view();
+            let pages = total.div_ceil(OPS_PAGE);
+            view! {
+                <div class="card doc-pane">
+                    <div class="card-title">
+                        <b class="mono">{title.clone()}</b>
+                        <span class="dim">{format!("{} ops", fmt::count_exact(total))}</span>
+                        {(pages > 1).then(|| view! {
+                            <span class="pager">
+                                <button disabled=move || page.get() == 0 on:click=move |_| page.update(|p| *p -= 1)>"‹"</button>
+                                <span>{move || format!("page {} / {pages}", page.get() + 1)}</span>
+                                <button disabled=move || page.get() + 1 >= pages on:click=move |_| page.update(|p| *p += 1)>"›"</button>
+                            </span>
+                        })}
+                    </div>
+                    <table class="dense rows mono">
+                        <thead><tr><th>"id"</th><th>"key"</th><th>"insert"</th><th>"Action"</th><th>"pred"</th></tr></thead>
+                        <tbody>{rows}</tbody>
+                    </table>
+                </div>
+            }
+        })
+    }
 }
 
 /// Opens `target` below `level`, or with `None` makes `level` the open pane again.

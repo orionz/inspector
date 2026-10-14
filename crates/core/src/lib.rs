@@ -39,6 +39,11 @@ mod tests {
                 }
                 Err(e) => format!("LOAD ERR {e}"),
             };
+            if let Ok(m) = &model {
+                let root_ops = m.object_ops(&automerge::ROOT).len();
+                let root_keys = m.page(&m.root(), None, 0, usize::MAX).total;
+                assert!(root_keys == 0 || root_ops > 0, "{path:?}: ROOT has keys but no ops");
+            }
             let shown: Vec<_> = changes_in_chunks.iter().take(6).collect();
             println!("{:?}: {summary}; per-chunk {:?}", path.file_name().unwrap(), shown);
         }

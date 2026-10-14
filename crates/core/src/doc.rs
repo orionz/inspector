@@ -44,6 +44,30 @@ pub struct DocModel {
     pub actors: Vec<ActorSummary>,
     by_hash: HashMap<ChangeHash, usize>,
     actor_prefix: usize,
+    ops_by_obj: std::cell::OnceCell<HashMap<String, Vec<ObjOp>>>,
+}
+
+/// One op on an object, formatted like the inspector's logical rows.
+#[derive(Debug, Clone)]
+pub struct ObjOp {
+    /// `ctr@abcd`, with the actor's first four hex digits.
+    pub id: String,
+    pub key: String,
+    pub insert: bool,
+    /// The action with its value, e.g. `makeMap`, `Set "cow"` or `Inc 2`.
+    pub action: String,
+    pub pred: String,
+    /// Index into [`DocModel::changes`] of the change holding the op.
+    pub change: Option<usize>,
+}
+
+fn id4(s: impl ToString) -> String {
+    let s = s.to_string();
+    match s.split_once('@') {
+        Some((ctr, actor)) => format!("{ctr}@{}", &actor[..actor.len().min(4)]),
+        None if s == "_root" => "ROOT".into(),
+        None => s,
+    }
 }
 
 pub fn author_label(bytes: &[u8]) -> String {
@@ -204,7 +228,53 @@ impl DocModel {
             actors,
             by_hash,
             actor_prefix,
+            ops_by_obj: Default::default(),
         }
+    }
+
+    /// Every op whose object is `obj`, in op id order. The first call
+    /// decodes every change in the document, so it is slow on large documents.
+    pub fn object_ops(&self, obj: &ObjId) -> &[ObjOp] {
+        let index = self.ops_by_obj.get_or_init(|| {
+            use automerge::legacy::{Key, OpType};
+            let mut by_obj: HashMap<String, Vec<(u64, String, ObjOp)>> = HashMap::new();
+            for change in self.doc.get_changes(&[]) {
+                let c = change.decode();
+                let actor = c.actor_id.to_hex_string();
+                let change_idx = c.hash.and_then(|h| self.by_hash.get(&h).copied());
+                for (i, op) in c.operations.iter().enumerate() {
+                    let ctr = c.start_op.get() + i as u64;
+                    let action = match &op.action {
+                        OpType::Make(t) => format!("make{t:?}"),
+                        OpType::Delete => "Del".into(),
+                        OpType::Increment(n) => format!("Inc {n}"),
+                        OpType::Put(v) => format!("Set {}", scalar(v).0),
+                        OpType::MarkBegin(m) => format!("Mark {}={}", m.name, scalar(&m.value).0),
+                        OpType::MarkEnd(_) => "Mark end".into(),
+                    };
+                    let row = ObjOp {
+                        id: format!("{ctr}@{}", &actor[..actor.len().min(4)]),
+                        key: match &op.key {
+                            Key::Map(s) => truncate(s, 60),
+                            Key::Seq(e) => id4(e),
+                        },
+                        insert: op.insert,
+                        action,
+                        pred: op.pred.iter().map(id4).collect::<Vec<_>>().join(", "),
+                        change: change_idx,
+                    };
+                    by_obj.entry(op.obj.to_string()).or_default().push((ctr, actor.clone(), row));
+                }
+            }
+            by_obj
+                .into_iter()
+                .map(|(k, mut v)| {
+                    v.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+                    (k, v.into_iter().map(|(_, _, r)| r).collect())
+                })
+                .collect()
+        });
+        index.get(&obj.to_string()).map(Vec::as_slice).unwrap_or_default()
     }
 
     /// The shortest prefix (at least 8 hex digits) that tells this document's actors apart.
