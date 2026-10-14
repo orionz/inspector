@@ -21,9 +21,9 @@ The three views sit on folder tabs above the file area.
 - Clicking a chunk shows its parts: Header (actor count), Changes and Ops
   (row count and bytes), and Extra when a change carries bytes after its
   columns. Clicking a part opens its detail and shrinks the parts into a
-  second band beside the chunk band. Click another part in that band to switch
-  to it, the open part to go back to the parts, or the chunk band to go back
-  to the stack.
+  second band beside the chunk band. In either band, click another chunk or
+  part to switch to it, or the open one to go back; clicking a band of small
+  chunks also goes back to the stack.
 - Header: facts (actors, heads, deps, seq/time/message, change-set fragment
   prefix counts, checksum) and a byte-layout bar of the whole chunk.
 - Changes and Ops get Physical / Logical tabs on the left edge:
@@ -35,8 +35,10 @@ The three views sit on folder tabs above the file area.
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
-- Clicking a column shrinks the columns into a third band (each sized by its
-  bytes) and opens its runs beside it; click another column in the band to
+- Columns that share an id (`obj.actor` + `obj.ctr`, `value.meta` +
+  `value.raw`, …) highlight and open together. Clicking one shrinks the
+  columns into a third band (each sized by its bytes) and opens their runs
+  beside it, one over the other; click another column in the band to
   switch, or the open one to go back. The runs show the repeat / literal /
   null byte split, every run with its row range, decoded values (deltas shown
   with their absolute span) and encoded bytes. Raw value columns show bytes per value type.

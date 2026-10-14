@@ -9,6 +9,7 @@ use am_inspect::doc::short_hex;
 use am_inspect::format_time;
 use leptos::context::Provider;
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::fmt;
 use crate::state::{AppState, Cache, ColumnRef, GroupView, Loaded, Part};
@@ -164,6 +165,12 @@ fn select_chunk(app: AppState, index: usize) {
     window().scroll_to_with_x_and_y(0.0, 0.0);
 }
 
+fn close_chunk(app: AppState) {
+    app.chunk.set(None);
+    app.part.set(None);
+    app.column.set(None);
+}
+
 fn chunk_stats(c: &Chunk, file_len: usize) -> String {
     let mut parts = vec![
         format!("{} B", fmt::count_exact(c.len())),
@@ -278,7 +285,8 @@ fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
 /// the chunk under the cursor, and over bands its neighbours half-sized
 /// behind it;
 /// clicking opens that chunk. Once a chunk is open the stack shrinks into a
-/// band at the left, and clicking the band closes the chunk.
+/// band at the left: clicking another chunk there opens it, and clicking the
+/// open chunk or a band of small chunks closes it.
 #[component]
 fn ChunkStack() -> impl IntoView {
     let app = expect_context::<AppState>();
@@ -320,7 +328,7 @@ fn ChunkStack() -> impl IntoView {
                         match item {
                             StackItem::Block { index, .. } => view! {
                                 <div class=format!("blk k-{}", color_key(&f.report.chunks[index]))
-                                    class:sel=move || app.chunk.get() == Some(index)
+                                    class:sel=move || app.chunk.get() == Some(index) data-i=index
                                     style:--h=h></div>
                             }
                             .into_any(),
@@ -400,6 +408,15 @@ fn ChunkStack() -> impl IntoView {
                 on:mousemove=track
                 on:mouseleave=move |_| hovered.set(None)
                 on:click=move |ev| {
+                    if let Some(open) = app.chunk.get_untracked() {
+                        let target = ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+                        let block = target.and_then(|t| t.closest(".blk").ok().flatten());
+                        match block.and_then(|b| b.get_attribute("data-i")).and_then(|i| i.parse().ok()) {
+                            Some(i) if i != open => select_chunk(app, i),
+                            _ => close_chunk(app),
+                        }
+                        return;
+                    }
                     track(ev);
                     if let Some(k) = hovered.get_untracked() {
                         hovered.set(None);
@@ -413,12 +430,10 @@ fn ChunkStack() -> impl IntoView {
                 </div>
             </div>
             <Show when=move || app.chunk.get().is_some()>
-                <button class="stack-close" title="Back to all chunks"
-                    on:click=move |_| { app.chunk.set(None); app.part.set(None); app.column.set(None); }>
+                <div class="stack-label">
                     <span class="stack-title" node_ref=title_el class:placed=move || title_y.get().is_some()
                         style:top=move || title_y.get().map(|y| format!("{y}px"))>{move || with_chunk(app, |_, c| format!("{} #{}", c.kind.label(), c.index))}</span>
-                    <span class="stack-back">"‹"</span>
-                </button>
+                </div>
             </Show>
         </div>
     }
@@ -710,10 +725,23 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
             let total = g.stored_len().max(1);
             let max = g.columns.iter().map(|c| c.stored_len).max().unwrap_or(1).max(1);
             let rows = g.rows;
+            let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
+            for (i, col) in g.columns.iter().enumerate() {
+                match spans.last_mut() {
+                    Some(r) if g.columns[r.start].spec.id() == col.spec.id() => r.end = i + 1,
+                    _ => spans.push(i..i + 1),
+                }
+            }
             Some(view! {
                 <div class="col-strip">
-                    {g.columns.iter().enumerate().map(|(index, col)| {
-                        let me = ColumnRef { ops, index };
+                    {spans.into_iter().map(|span| {
+                        let me = ColumnRef { ops, index: span.start };
+                        let bytes: usize = g.columns[span.clone()].iter().map(|c| c.stored_len.max(1)).sum();
+                        view! {
+                            <div class="strip-group" class:sel=move || app.column.get() == Some(me)
+                                style=format!("--b: {bytes}")
+                                on:click=move |_| app.column.update(|c| *c = (*c != Some(me)).then_some(me))>
+                    {g.columns[span].iter().map(|col| {
                         let ty = col.col_type().short();
                         let h = (STRIP_H * col.stored_len as f64 / max as f64).max(2.0);
                         let title = format!(
@@ -726,9 +754,8 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
                             if col.deflated() { format!("\ndeflated from {}", fmt::bytes(col.data.len())) } else { String::new() }
                         );
                         view! {
-                            <button class="strip-col" class:sel=move || app.column.get() == Some(me)
+                            <button class="strip-col"
                                 style=format!("--cc: var(--t-{ty}); --b: {}", col.stored_len.max(1))
-                                on:click=move |_| app.column.update(|c| *c = (*c != Some(me)).then_some(me))
                                 title=title>
                                 <span class="strip-bar-area">
                                     <span class="strip-bytes">{fmt::bytes(col.stored_len)}</span>
@@ -736,6 +763,9 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
                                 </span>
                                 <span class="strip-name">{col.name.clone()}{col.deflated().then(|| " z")}</span>
                             </button>
+                        }
+                    }).collect_view()}
+                            </div>
                         }
                     }).collect_view()}
                 </div>
@@ -832,12 +862,27 @@ fn run_value(col: &ColumnInfo, run: &Run, actors: &[String]) -> String {
     s
 }
 
+/// The runs of every column sharing the selected column's id, one card over another.
 #[component]
 fn RunPanel() -> impl IntoView {
     let app = expect_context::<AppState>();
+    move || {
+        let sel = app.column.get()?;
+        let span = with_chunk(app, |_, c| {
+            let cols = &c.group(sel.ops)?.columns;
+            let id = cols.get(sel.index)?.spec.id();
+            Some(sel.index..sel.index + cols[sel.index..].iter().take_while(|c| c.spec.id() == id).count())
+        })
+        .flatten()?;
+        Some(span.map(|index| view! { <RunCard col_ref=ColumnRef { ops: sel.ops, index }/> }).collect_view())
+    }
+}
+
+#[component]
+fn RunCard(col_ref: ColumnRef) -> impl IntoView {
+    let app = expect_context::<AppState>();
     let cache: Cache<(usize, usize, ColumnRef), DecodedRuns> = Cache::new();
     move || {
-        let col_ref = app.column.get()?;
         let (col, runs, actors, by_type) = with_chunk(app, |f, c| {
             let group = c.group(col_ref.ops)?;
             let col = group.columns.get(col_ref.index)?.clone();
@@ -878,7 +923,9 @@ fn RunPanel() -> impl IntoView {
                         <span class="dim">{format!("{} rows/run", fmt::per_row(s.rows, s.runs))}</span>
                     })}
                     <span class="spacer"></span>
-                    <button class="link" on:click=move |_| app.column.set(None)>"close ✕"</button>
+                    {(app.column.get_untracked().is_some_and(|c| c.index == col_ref.index)).then(|| view! {
+                        <button class="link" on:click=move |_| app.column.set(None)>"close ✕"</button>
+                    })}
                 </div>
                 {runs.error.clone().map(|e| view! { <div class="error">{e}</div> })}
                 {(!raw).then(|| view! {
