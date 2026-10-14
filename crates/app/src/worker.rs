@@ -50,6 +50,8 @@ pub struct Entry {
     pub conflict: bool,
     /// Which change set the value, for a tooltip.
     pub origin: String,
+    /// Gone by this version, shown as a tombstone.
+    pub deleted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -82,8 +84,8 @@ pub enum Req {
     Load { hidden_deps: Vec<String> },
     /// How long automerge takes to load the saved bytes.
     SavedLoadMs,
-    Page { obj: String, step: usize, limit: usize },
-    Text { obj: String, step: usize, limit_chars: usize },
+    Page { obj: String, step: usize, limit: usize, tombstones: bool },
+    Text { obj: String, step: usize, limit_chars: usize, tombstones: bool },
     Json { obj: String, step: usize, limit: usize },
     Ops { obj: String, upto: Option<usize>, start: usize, limit: usize },
     ChangeTime { index: usize },
@@ -94,7 +96,7 @@ pub enum Resp {
     Loaded(Result<Summary, String>),
     Ms(f64),
     Page { entries: Vec<Entry>, total: usize },
-    Text { text: String, chars: usize, marks: Vec<String> },
+    Text { text: String, chars: usize, marks: Vec<String>, spans: Option<Vec<(String, bool)>> },
     Json { json: String, cut: bool },
     Ops { ops: Vec<Op>, total: usize },
     Time(String),
@@ -187,13 +189,17 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
         }
     };
     let resp = match req {
-        Req::Page { obj, step, limit } => {
-            let heads = heads_at(step);
-            let page = m.page(&obj_of(&obj), heads.as_deref(), 0, limit);
-            let entries = page
-                .entries
+        Req::Page { obj, step, limit, tombstones } => {
+            let (entries, total) = if tombstones {
+                m.page_with_tombstones(&obj_of(&obj), step, limit)
+            } else {
+                let page = m.page(&obj_of(&obj), heads_at(step).as_deref(), 0, limit);
+                (page.entries.into_iter().map(|e| (e, false)).collect(), page.total)
+            };
+            let entries = entries
                 .into_iter()
-                .map(|e| Entry {
+                .map(|(e, deleted)| Entry {
+                    deleted,
                     origin: origin_label(m, e.origin, &e.op_id),
                     id: e.op_id.clone(),
                     value: match e.value {
@@ -204,9 +210,9 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
                     conflict: e.conflict,
                 })
                 .collect();
-            Resp::Page { entries, total: page.total }
+            Resp::Page { entries, total }
         }
-        Req::Text { obj, step, limit_chars } => {
+        Req::Text { obj, step, limit_chars, tombstones } => {
             let heads = heads_at(step);
             let obj = obj_of(&obj);
             let text = m.text(&obj, heads.as_deref());
@@ -215,6 +221,10 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
                 text: text.chars().take(limit_chars).collect(),
                 chars,
                 marks: m.marks(&obj, heads.as_deref()),
+                spans: tombstones
+                    .then(|| m.text_with_tombstones(&obj, step, limit_chars))
+                    .flatten()
+                    .map(|s| s.into_iter().map(|s| (s.text, s.deleted)).collect()),
             }
         }
         Req::Json { obj, step, limit } => {

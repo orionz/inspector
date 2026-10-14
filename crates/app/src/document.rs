@@ -74,7 +74,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
         let obj = obj.clone();
         use_query(format!("band:{level}"), move || {
             (band() && kind != ObjKind::Text)
-                .then(|| Req::Page { obj: obj.clone(), step: app.step.get(), limit: BAND_STRIPES + 1 })
+                .then(|| Req::Page { obj: obj.clone(), step: app.step.get(), limit: BAND_STRIPES + 1, tombstones: false })
         })
     };
     let (pane_data, busy) = {
@@ -84,14 +84,15 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 return None;
             }
             let (obj, step) = (obj.clone(), app.step.get());
+            let tombstones = app.tombstones.get() && app.drag_from.get().is_none();
             Some(match app.doc_mode.get() {
                 DocMode::Ops => {
                     let upto = (!app.tombstones.get()).then(|| app.drag_from.get().map_or(step, |f| f.max(step)));
                     Req::Ops { obj, upto, start: ops_page.get() * OPS_PAGE, limit: OPS_PAGE }
                 }
                 DocMode::Json => Req::Json { obj, step, limit: JSON_LIMIT },
-                DocMode::Value if kind == ObjKind::Text => Req::Text { obj, step, limit_chars: text_chars.get() },
-                DocMode::Value => Req::Page { obj, step, limit: limit.get() },
+                DocMode::Value if kind == ObjKind::Text => Req::Text { obj, step, limit_chars: text_chars.get(), tombstones },
+                DocMode::Value => Req::Page { obj, step, limit: limit.get(), tombstones },
             })
         })
     };
@@ -106,8 +107,8 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
             match app.doc_mode.get() {
                 DocMode::Ops => None,
                 DocMode::Json => Some(Req::Json { obj, step: from, limit: JSON_LIMIT }),
-                DocMode::Value if kind == ObjKind::Text => Some(Req::Text { obj, step: from, limit_chars: text_chars.get() }),
-                DocMode::Value => Some(Req::Page { obj, step: from, limit: limit.get() }),
+                DocMode::Value if kind == ObjKind::Text => Some(Req::Text { obj, step: from, limit_chars: text_chars.get(), tombstones: false }),
+                DocMode::Value => Some(Req::Page { obj, step: from, limit: limit.get(), tombstones: false }),
             }
         })
     };
@@ -157,7 +158,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
         let base = if diffing() { base_data.get() } else { None };
         let body = pane_data.with(|d| match d {
             None => view! { <div class="card doc-pane">{head(String::new())}</div> }.into_any(),
-            Some(Resp::Text { text, chars, marks }) => {
+            Some(Resp::Text { text, chars, marks, spans }) => {
                 let chars = *chars;
                 view! {
                     <div class="card doc-pane text-pane">
@@ -165,7 +166,14 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                         <pre class="text">
                             {match &base {
                                 Some(Resp::Text { text: old, .. }) => diff_text(old, text).into_any(),
-                                _ => text.clone().into_any(),
+                                _ => match spans {
+                                    Some(spans) => spans.iter().map(|(t, gone)| if *gone {
+                                        view! { <del class="tomb">{t.clone()}</del> }.into_any()
+                                    } else {
+                                        t.clone().into_any()
+                                    }).collect_view().into_any(),
+                                    None => text.clone().into_any(),
+                                },
                             }}
                             {(chars > text.chars().count()).then(|| "…")}
                         </pre>
@@ -185,11 +193,11 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
             Some(Resp::Page { entries, total }) => {
                 let total = *total;
                 let list = kind == ObjKind::List;
-                let shown = entries.len();
+                let shown = entries.iter().filter(|e| !e.deleted).count();
                 let marked = match &base {
                     Some(Resp::Page { entries: old, .. }) if list => diff_list(old, entries),
                     Some(Resp::Page { entries: old, .. }) => diff_map(old, entries),
-                    _ => entries.iter().map(|e| (Mark::Same, e.clone())).collect(),
+                    _ => entries.iter().map(|e| (if e.deleted { Mark::Tomb } else { Mark::Same }, e.clone())).collect(),
                 };
                 let items = if list {
                     let items = marked.into_iter().enumerate().map(|(i, (mark, e))| view! {
@@ -213,7 +221,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                     <div class="card doc-pane">
                         {head(obj_label(kind, total))}
                         {items}
-                        {(total == 0).then(|| view! { <p class="dim">"(empty)"</p> })}
+                        {entries.is_empty().then(|| view! { <p class="dim">"(empty)"</p> })}
                         {(total > shown).then(|| view! {
                             <button class="link more" on:click=move |_| limit.update(|l| *l += PANE_LIMIT)>
                                 {format!("show more ({shown} of {})", fmt::count(total))}
@@ -291,6 +299,7 @@ enum Mark {
     Same,
     Added,
     Removed,
+    Tomb,
 }
 
 impl Mark {
@@ -299,6 +308,7 @@ impl Mark {
             Mark::Same => "",
             Mark::Added => "diff-add",
             Mark::Removed => "diff-del",
+            Mark::Tomb => "tomb",
         }
     }
 }

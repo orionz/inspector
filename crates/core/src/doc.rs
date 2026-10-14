@@ -44,7 +44,48 @@ pub struct DocModel {
     pub actors: Vec<ActorSummary>,
     by_hash: HashMap<ChangeHash, usize>,
     actor_prefix: usize,
-    ops_by_obj: std::cell::OnceCell<HashMap<String, Vec<ObjOp>>>,
+    ops_by_obj: std::cell::OnceCell<ObjIndex>,
+    history: std::cell::RefCell<Option<(String, std::rc::Rc<History>)>>,
+}
+
+#[derive(Default)]
+struct ObjIndex {
+    rows: HashMap<String, Vec<ObjOp>>,
+    raw: HashMap<String, Vec<RawOp>>,
+    actors: Vec<String>,
+}
+
+/// Counter and the actor's rank among the document's actors, so ids order like automerge's.
+type OpKey = (u64, u32);
+
+struct RawOp {
+    id: OpKey,
+    key: RawKey,
+    insert: bool,
+    kind: RawKind,
+    pred: Vec<OpKey>,
+    change: Option<usize>,
+}
+
+enum RawKey {
+    Map(String),
+    Head,
+    Elem(OpKey),
+}
+
+enum RawKind {
+    Put(ScalarValue),
+    Make(ObjType),
+    Del,
+    Inc,
+    Mark,
+}
+
+/// A text object's characters, live or deleted, in document order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextSpan {
+    pub text: String,
+    pub deleted: bool,
 }
 
 /// One op on an object, formatted like the inspector's logical rows.
@@ -263,18 +304,32 @@ impl DocModel {
             by_hash,
             actor_prefix,
             ops_by_obj: Default::default(),
+            history: Default::default(),
         }
     }
 
     /// Every op whose object is `obj`, in op id order. The first call
     /// decodes every change in the document, so it is slow on large documents.
     pub fn object_ops(&self, obj: &ObjId) -> &[ObjOp] {
-        let index = self.ops_by_obj.get_or_init(|| {
-            use automerge::legacy::{Key, OpType};
-            let mut by_obj: HashMap<String, Vec<(u64, String, ObjOp)>> = HashMap::new();
-            for change in self.doc.get_changes(&[]) {
-                let c = change.decode();
+        self.index().rows.get(&obj.to_string()).map(Vec::as_slice).unwrap_or_default()
+    }
+
+    fn index(&self) -> &ObjIndex {
+        self.ops_by_obj.get_or_init(|| {
+            use automerge::legacy::{ElementId, Key, OpType};
+            let changes = self.doc.get_changes(&[]);
+            let decoded: Vec<_> = changes.iter().map(|c| c.decode()).collect();
+            let mut actors: Vec<String> = decoded.iter().map(|c| c.actor_id.to_hex_string()).collect();
+            actors.sort();
+            actors.dedup();
+            let rank = |a: &automerge::ActorId| {
+                actors.binary_search(&a.to_hex_string()).map_or(u32::MAX, |i| i as u32)
+            };
+            let mut rows: HashMap<String, Vec<(OpKey, ObjOp)>> = HashMap::new();
+            let mut raw: HashMap<String, Vec<RawOp>> = HashMap::new();
+            for c in &decoded {
                 let actor = c.actor_id.to_hex_string();
+                let me = rank(&c.actor_id);
                 let change_idx = c.hash.and_then(|h| self.by_hash.get(&h).copied());
                 for (i, op) in c.operations.iter().enumerate() {
                     let ctr = c.start_op.get() + i as u64;
@@ -297,18 +352,167 @@ impl DocModel {
                         pred: op.pred.iter().map(id4).collect::<Vec<_>>().join(", "),
                         change: change_idx,
                     };
-                    by_obj.entry(op.obj.to_string()).or_default().push((ctr, actor.clone(), row));
+                    let obj = op.obj.to_string();
+                    rows.entry(obj.clone()).or_default().push(((ctr, me), row));
+                    raw.entry(obj).or_default().push(RawOp {
+                        id: (ctr, me),
+                        key: match &op.key {
+                            Key::Map(s) => RawKey::Map(s.to_string()),
+                            Key::Seq(ElementId::Head) => RawKey::Head,
+                            Key::Seq(ElementId::Id(e)) => RawKey::Elem((e.counter(), rank(e.actor()))),
+                        },
+                        insert: op.insert,
+                        kind: match &op.action {
+                            OpType::Make(t) => RawKind::Make((*t).into()),
+                            OpType::Delete => RawKind::Del,
+                            OpType::Increment(_) => RawKind::Inc,
+                            OpType::Put(v) => RawKind::Put(v.clone()),
+                            OpType::MarkBegin(_) | OpType::MarkEnd(_) => RawKind::Mark,
+                        },
+                        pred: op.pred.iter().map(|p| (p.counter(), rank(p.actor()))).collect(),
+                        change: change_idx,
+                    });
                 }
             }
-            by_obj
+            let rows = rows
                 .into_iter()
                 .map(|(k, mut v)| {
-                    v.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-                    (k, v.into_iter().map(|(_, _, r)| r).collect())
+                    v.sort_by_key(|(id, _)| *id);
+                    (k, v.into_iter().map(|(_, r)| r).collect())
                 })
-                .collect()
-        });
-        index.get(&obj.to_string()).map(Vec::as_slice).unwrap_or_default()
+                .collect();
+            ObjIndex { rows, raw, actors }
+        })
+    }
+
+    fn history(&self, obj: &ObjId, ops: &[RawOp]) -> std::rc::Rc<History> {
+        let key = obj.to_string();
+        let mut slot = self.history.borrow_mut();
+        match &*slot {
+            Some((k, h)) if *k == key => h.clone(),
+            _ => {
+                let h = std::rc::Rc::new(History::new(ops));
+                *slot = Some((key, h.clone()));
+                h
+            }
+        }
+    }
+
+    fn op_exid(&self, actors: &[String], id: OpKey) -> ObjId {
+        let actor = actors.get(id.1 as usize).map_or("", String::as_str);
+        self.doc.import_obj(&format!("{}@{actor}", id.0)).unwrap_or(ROOT)
+    }
+
+    /// Like [`page`](Self::page), with the entries deleted by `step`
+    /// interleaved where they stood, flagged `true`. Slow on large objects:
+    /// the first call decodes every change in the document.
+    pub fn page_with_tombstones(&self, obj: &ObjId, step: usize, limit: usize) -> (Vec<(Entry, bool)>, usize) {
+        let heads = self.heads_at(step);
+        let heads = heads.as_deref();
+        let page = self.page(obj, heads, 0, limit);
+        let total = page.total;
+        let all_shown = page.entries.len() >= total;
+        let index = self.index();
+        let Some(ops) = index.raw.get(&obj.to_string()) else {
+            return (page.entries.into_iter().map(|e| (e, false)).collect(), total);
+        };
+        let history = self.history(obj, ops);
+        let life = Life { step, ops, h: &history };
+        let gone = |op: &RawOp| {
+            let (key, value) = match &op.kind {
+                RawKind::Put(v) => (op.id, Value::Scalar(std::borrow::Cow::Owned(v.clone()))),
+                RawKind::Make(t) => (op.id, Value::Object(*t)),
+                _ => return None,
+            };
+            let id = self.op_exid(&index.actors, key);
+            let mut e = self.entry(String::new(), value, id, false, heads);
+            e.origin = op.change;
+            Some(e)
+        };
+        let mut out = Vec::new();
+        if matches!(self.doc.object_type(obj), Ok(ObjType::Map | ObjType::Table)) {
+            let mut by_key: std::collections::BTreeMap<&str, Vec<&RawOp>> = Default::default();
+            for op in ops.iter().filter(|o| life.exists(o) && life.is_value(o)) {
+                if let RawKey::Map(k) = &op.key {
+                    by_key.entry(k).or_default().push(op);
+                }
+            }
+            let last_key = page.entries.last().map(|e| e.key.clone());
+            let mut dead = by_key
+                .into_iter()
+                .filter(|(_, ops)| !ops.iter().any(|o| life.alive(o)))
+                .filter(|(k, _)| all_shown || last_key.as_deref().is_some_and(|l| *k < l))
+                .filter_map(|(k, ops)| {
+                    let mut e = gone(ops.iter().max_by_key(|o| o.id)?)?;
+                    e.key = k.to_string();
+                    Some(e)
+                })
+                .peekable();
+            for e in page.entries {
+                while let Some(d) = dead.next_if(|d| d.key < e.key) {
+                    out.push((d, true));
+                }
+                out.push((e, false));
+            }
+            out.extend(dead.map(|d| (d, true)));
+            return (out, total);
+        }
+        let seq: Vec<_> = life.sequence().collect();
+        if seq.iter().filter(|(_, live)| *live).count() != total {
+            return (page.entries.into_iter().map(|e| (e, false)).collect(), total);
+        }
+        let mut live = page.entries.into_iter();
+        let mut pending = Vec::new();
+        for (elem, is_live) in seq {
+            if is_live {
+                let Some(e) = live.next() else { break };
+                out.append(&mut pending);
+                out.push((e, false));
+            } else if let Some(mut e) = life.last_value(elem).and_then(gone) {
+                e.key = "×".into();
+                pending.push((e, true));
+            }
+        }
+        if all_shown {
+            out.append(&mut pending);
+        }
+        (out, total)
+    }
+
+    /// A text object's characters at `step` with the deleted ones between
+    /// them, up to `limit_chars` live characters; `None` if the ops could not
+    /// be replayed to match automerge. Slow on large objects.
+    pub fn text_with_tombstones(&self, obj: &ObjId, step: usize, limit_chars: usize) -> Option<Vec<TextSpan>> {
+        let heads = self.heads_at(step);
+        let expect: String = self.text(obj, heads.as_deref()).chars().take(limit_chars).collect();
+        let ops = self.index().raw.get(&obj.to_string())?;
+        let history = self.history(obj, ops);
+        let life = Life { step, ops, h: &history };
+        let mut spans: Vec<TextSpan> = Vec::new();
+        let mut live_text = String::new();
+        let mut live_chars = 0;
+        for (elem, is_live) in life.sequence() {
+            if is_live && live_chars >= limit_chars {
+                break;
+            }
+            let value = if is_live { life.live_value(elem) } else { life.last_value(elem) };
+            let Some(RawOp { kind: RawKind::Put(ScalarValue::Str(s)), .. }) = value else {
+                if is_live {
+                    return None;
+                }
+                continue;
+            };
+            if is_live {
+                live_text.push_str(s);
+                live_chars += s.chars().count();
+            }
+            match spans.last_mut() {
+                Some(last) if last.deleted != is_live => last.text.push_str(s),
+                _ => spans.push(TextSpan { text: s.to_string(), deleted: !is_live }),
+            }
+        }
+        let live_text: String = live_text.chars().take(limit_chars).collect();
+        (live_text == expect).then_some(spans)
     }
 
     /// The shortest prefix (at least 8 hex digits) that tells this document's actors apart.
@@ -510,6 +714,101 @@ impl DocModel {
             }
         };
         ObjectPage { entries, total }
+    }
+}
+
+/// What an object's ops did to each other, independent of the version shown.
+struct History {
+    /// For each op, the earliest change that overwrote or deleted it.
+    ended: HashMap<OpKey, usize>,
+    /// The value ops of each list element, the inserting op first.
+    values: HashMap<OpKey, Vec<usize>>,
+    /// Every list element ever inserted, in list order.
+    order: Vec<OpKey>,
+}
+
+impl History {
+    fn new(ops: &[RawOp]) -> Self {
+        let mut ended: HashMap<OpKey, usize> = HashMap::new();
+        let mut values: HashMap<OpKey, Vec<usize>> = HashMap::new();
+        let mut children: HashMap<Option<OpKey>, Vec<(OpKey, bool)>> = HashMap::new();
+        for (i, op) in ops.iter().enumerate() {
+            if !matches!(op.kind, RawKind::Inc) {
+                let at = op.change.unwrap_or(0);
+                for p in &op.pred {
+                    ended.entry(*p).and_modify(|e| *e = (*e).min(at)).or_insert(at);
+                }
+            }
+            if matches!(op.kind, RawKind::Put(_) | RawKind::Make(_)) {
+                match (&op.key, op.insert) {
+                    (_, true) => values.entry(op.id).or_default().insert(0, i),
+                    (RawKey::Elem(e), false) => values.entry(*e).or_default().push(i),
+                    _ => {}
+                }
+            }
+            if op.insert {
+                let parent = match op.key {
+                    RawKey::Elem(e) => Some(e),
+                    _ => None,
+                };
+                children.entry(parent).or_default().push((op.id, matches!(op.kind, RawKind::Mark)));
+            }
+        }
+        for c in children.values_mut() {
+            c.sort_by(|a, b| b.0.cmp(&a.0));
+        }
+        let mut order = Vec::new();
+        let mut stack: Vec<(OpKey, bool)> = children.get(&None).map(|c| c.iter().rev().copied().collect()).unwrap_or_default();
+        while let Some((id, mark)) = stack.pop() {
+            if !mark {
+                order.push(id);
+            }
+            if let Some(c) = children.get(&Some(id)) {
+                stack.extend(c.iter().rev().copied());
+            }
+        }
+        Self { ended, values, order }
+    }
+}
+
+/// Which of an object's ops exist and are still in effect after the first `step` changes.
+struct Life<'a> {
+    step: usize,
+    ops: &'a [RawOp],
+    h: &'a History,
+}
+
+impl<'a> Life<'a> {
+    fn exists(&self, op: &RawOp) -> bool {
+        op.change.unwrap_or(0) < self.step
+    }
+
+    fn is_value(&self, op: &RawOp) -> bool {
+        matches!(op.kind, RawKind::Put(_) | RawKind::Make(_))
+    }
+
+    fn alive(&self, op: &RawOp) -> bool {
+        self.exists(op) && self.is_value(op) && self.h.ended.get(&op.id).is_none_or(|&e| e >= self.step)
+    }
+
+    fn values(&self, elem: OpKey) -> impl Iterator<Item = &'a RawOp> + '_ {
+        self.h.values.get(&elem).into_iter().flatten().map(|&i| &self.ops[i])
+    }
+
+    fn live_value(&self, elem: OpKey) -> Option<&'a RawOp> {
+        self.values(elem).filter(|o| self.alive(o)).max_by_key(|o| o.id)
+    }
+
+    fn last_value(&self, elem: OpKey) -> Option<&'a RawOp> {
+        self.values(elem).filter(|o| self.exists(o)).max_by_key(|o| o.id)
+    }
+
+    /// Every element inserted by `step`, in list order, with whether it is still there.
+    fn sequence(&self) -> impl Iterator<Item = (OpKey, bool)> + '_ {
+        self.h.order.iter().filter_map(|&id| {
+            let first = self.values(id).next()?;
+            self.exists(first).then(|| (id, self.live_value(id).is_some()))
+        })
     }
 }
 

@@ -429,7 +429,14 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .side-tabs button span { display: inline-block; writing-mode: vertical-rl; }
 .side-tabs button:hover { color: var(--text); filter: none; }
 .side-tabs button.active { width: 38px; margin-left: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
-.side-check { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 36px; margin-top: 10px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.side-check {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; width: 36px; margin-top: 14px; padding: 12px 0;
+  border: 2px solid #000; border-left: 0; border-radius: 0 10px 10px 0; background: var(--panel);
+  font-size: 12px; font-weight: 600; color: var(--dim); cursor: pointer;
+}
+.side-check:has(input:checked) { color: var(--text); }
+.tomb { color: #c4282d; text-decoration: line-through; opacity: .7; }
+.tomb .val, .tomb .obj-chip { color: inherit; text-decoration: inherit; }
 .side-check span { writing-mode: vertical-rl; }
 .side-check:hover { color: var(--text); }
 .col-strip { display: flex; gap: 8px; align-items: flex-start; overflow-x: auto; padding: 4px 4px 8px; }
