@@ -1,14 +1,19 @@
 //! Fetching documents from Patchwork's subduction sync server.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use automerge::{Change, ChangeHash};
 
 use future_form::Local;
 use futures::channel::{mpsc, oneshot};
 use futures::future::LocalBoxFuture;
 use futures::{FutureExt, StreamExt};
+use sedimentree_core::loose_commit::id::CommitId;
 use sedimentree_core::crypto::fingerprint::FingerprintSeed;
+use sedimentree_core::fragment::Fragment;
+use sedimentree_core::loose_commit::LooseCommit;
+use sedimentree_core::sedimentree::{FingerprintSummary, Sedimentree, SedimentreeItem};
 use sedimentree_core::id::SedimentreeId;
-use sedimentree_core::sedimentree::FingerprintSummary;
 use subduction_core::connection::message::{BatchSyncRequest, RequestId, SyncMessage, SyncResult};
 use subduction_core::handshake::{self, audience::Audience, Handshake};
 use subduction_core::peer::id::PeerId;
@@ -33,9 +38,19 @@ pub fn title(link: &str) -> Option<String> {
     js_sys::decode_uri_component(&raw.replace('+', " ")).ok()?.as_string()
 }
 
-/// Downloads every fragment and then every loose commit the server stores
-/// for the document, each as the automerge chunk it was stored as.
-pub async fn fetch(doc_id: &str) -> Result<Vec<Vec<u8>>, String> {
+/// What the server stores for a document, reduced to the pieces a reader needs.
+pub struct Fetched {
+    /// The fragments and then the kept loose commits, each in causal order
+    /// and each the automerge chunk it was stored as.
+    pub chunks: Vec<Vec<u8>>,
+    pub fragments: usize,
+    /// Loose commits kept, of those sent; the rest only repeat changes inside fragments.
+    pub commits: (usize, usize),
+}
+
+/// Downloads everything the server stores for the document, leaving out
+/// loose commits whose change a fragment already holds.
+pub async fn fetch(doc_id: &str) -> Result<Fetched, String> {
     let uuid = bs58::decode(doc_id)
         .with_check(None)
         .into_vec()
@@ -75,16 +90,46 @@ pub async fn fetch(doc_id: &str) -> Result<Vec<Vec<u8>>, String> {
         }
     };
     socket.close();
-    match result {
-        SyncResult::Ok(diff) => Ok(diff
-            .missing_fragments
-            .into_iter()
-            .map(|(_, blob)| blob.into_contents())
-            .chain(diff.missing_commits.into_iter().map(|(_, blob)| blob.into_contents()))
-            .collect()),
-        SyncResult::NotFound => Err("the sync server doesn't have this document".into()),
-        SyncResult::Unauthorized => Err("the sync server refused access to this document".into()),
+    let diff = match result {
+        SyncResult::Ok(diff) => diff,
+        SyncResult::NotFound => return Err("the sync server doesn't have this document".into()),
+        SyncResult::Unauthorized => return Err("the sync server refused access to this document".into()),
+    };
+    let mut blobs: HashMap<CommitId, Vec<u8>> = HashMap::new();
+    let mut fragments = vec![];
+    let mut commits = vec![];
+    for (signed, blob) in diff.missing_fragments {
+        let f: Fragment = signed.try_decode_trusted_payload().map_err(|e| format!("bad fragment: {e}"))?;
+        blobs.insert(f.head(), blob.into_contents());
+        fragments.push(f);
     }
+    for (signed, blob) in diff.missing_commits {
+        let c: LooseCommit = signed.try_decode_trusted_payload().map_err(|e| format!("bad commit: {e}"))?;
+        blobs.entry(c.head()).or_insert_with(|| blob.into_contents());
+        commits.push(c);
+    }
+    let tree = Sedimentree::new(fragments, commits);
+    let kept_fragments: Vec<&Fragment> = tree.fragments().collect();
+    let kept_commits: Vec<&LooseCommit> = tree.loose_commits().collect();
+    let order = tree.topsorted_blob_order().map_err(|e| format!("{e:?}"))?;
+    let mut fragment_chunks = vec![];
+    let mut commit_chunks = vec![];
+    for item in order {
+        match item {
+            SedimentreeItem::Fragment(i) => fragment_chunks.extend(blobs.remove(&kept_fragments[i].head())),
+            SedimentreeItem::LooseCommit(i) => commit_chunks.extend(blobs.remove(&kept_commits[i].head())),
+        }
+    }
+    let mut in_fragments = automerge::Automerge::new();
+    let _ = in_fragments.load_incremental(&fragment_chunks.concat());
+    let covered: HashSet<ChangeHash> = in_fragments.get_changes_meta(&[]).iter().map(|m| m.hash).collect();
+    let sent_commits = commit_chunks.len();
+    commit_chunks.retain(|c| Change::try_from(&c[..]).map_or(true, |c| !covered.contains(&c.hash())));
+    Ok(Fetched {
+        fragments: fragment_chunks.len(),
+        commits: (commit_chunks.len(), sent_commits),
+        chunks: fragment_chunks.into_iter().chain(commit_chunks).collect(),
+    })
 }
 
 struct Socket {

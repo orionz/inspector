@@ -484,3 +484,6 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .col-view.open .strip-name { height: auto; max-height: 100%; padding: 0; color: #000; font-weight: 600; font-size: 11px; }
 .col-view .runs { margin-bottom: 0; }
 .hex { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 0; }
+
+.am-link { color: var(--accent, #3b6ef0); text-decoration: underline; text-underline-offset: 2px; }
+.am-link:hover { text-decoration-thickness: 2px; }

@@ -61,6 +61,7 @@ async fn fetch_bytes(url: String) -> Result<Vec<u8>, String> {
 }
 
 fn open_file(app: AppState, file: web_sys::File) {
+    app.fetched.set(None);
     let name = file.name();
     spawn_local(async move {
         match read_file(file).await {
@@ -71,6 +72,7 @@ fn open_file(app: AppState, file: web_sys::File) {
 }
 
 fn open_sample(app: AppState, name: &'static str) {
+    app.fetched.set(None);
     app.status.set(Some(format!("Fetching {name}…")));
     spawn_local(async move {
         match fetch_bytes(format!("samples/{name}")).await {
@@ -96,8 +98,16 @@ fn open_link(app: AppState, link: String) {
     app.status.set(Some(format!("Fetching {name} from {}…", patchwork::SERVER)));
     spawn_local(async move {
         match patchwork::fetch(&id).await {
-            Ok(pieces) if pieces.is_empty() => app.status.set(Some(format!("The sync server has nothing stored for {name}"))),
-            Ok(pieces) => app.open(name, pieces.concat()),
+            Ok(f) if f.chunks.is_empty() => app.status.set(Some(format!("The sync server has nothing stored for {name}"))),
+            Ok(f) => {
+                let (kept, sent) = f.commits;
+                app.fetched.set(Some(format!(
+                    "{} fragments + {kept} loose commits ({} repeats left out)",
+                    f.fragments,
+                    fmt::count_exact(sent - kept)
+                )));
+                app.open(name, f.chunks.concat());
+            }
             Err(e) => app.status.set(Some(format!("Could not fetch {name}: {e}"))),
         }
     });
@@ -128,6 +138,7 @@ fn Header() -> impl IntoView {
                     <span class="pill">{format!("{} chunks", r.chunks.len())}</span>
                     <span class="pill">{format!("{} changes", fmt::count(changes))}</span>
                     <span class="pill">{format!("{} ops", fmt::count(ops))}</span>
+                    {app.fetched.get().map(|f| view! { <span class="pill" title="What the sync server stores; loose commits whose change is already inside a fragment are left out">{f}</span> })}
                 }
             })
         })

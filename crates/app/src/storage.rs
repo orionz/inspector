@@ -78,6 +78,8 @@ const ABSORB_FACTOR: usize = 3;
 const BLOCK_MIN_H: f64 = 26.0;
 /// Vertical space per tiny chunk, so the cursor steps through them one by one.
 const BAND_PITCH: f64 = 3.0;
+/// Tightest spacing at which bands are still drawn one per chunk.
+const MIN_STRIPE_PITCH: f64 = 2.0;
 /// Past this height a band group squeezes its bands below one pitch.
 const MAX_BANDS_H: f64 = 1500.0;
 /// Size spreads above this ratio switch block heights to a log scale.
@@ -147,6 +149,29 @@ fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
         }
     }
     StackLayout { items }
+}
+
+/// The colour key of each stripe in a band `height` px tall. Past one
+/// stripe per `MIN_STRIPE_PITCH`, each stripe stands for a run of chunks
+/// and takes the colour most of them share.
+fn band_stripes(chunks: &[Chunk], height: f64) -> Vec<&'static str> {
+    let cap = ((height / MIN_STRIPE_PITCH) as usize).max(1);
+    if chunks.len() <= cap {
+        return chunks.iter().map(color_key).collect();
+    }
+    (0..cap)
+        .map(|i| {
+            let run = &chunks[i * chunks.len() / cap..(i + 1) * chunks.len() / cap];
+            let mut counts: Vec<(&'static str, usize)> = vec![];
+            for k in run.iter().map(color_key) {
+                match counts.iter_mut().find(|(c, _)| *c == k) {
+                    Some((_, n)) => *n += 1,
+                    None => counts.push((k, 1)),
+                }
+            }
+            counts.into_iter().max_by_key(|(_, n)| *n).map_or("unknown", |(k, _)| k)
+        })
+        .collect()
 }
 
 fn select_chunk(app: AppState, index: usize) {
@@ -315,7 +340,8 @@ fn ChunkStack() -> impl IntoView {
                     .items
                     .into_iter()
                     .map(|item| {
-                        let h = item.height().to_string();
+                        let height = item.height();
+                        let h = height.to_string();
                         match item {
                             StackItem::Block { index, .. } => view! {
                                 <div class=format!("blk k-{}", color_key(&f.report.chunks[index]))
@@ -328,8 +354,9 @@ fn ChunkStack() -> impl IntoView {
                                     class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
                                     style:--h=h>
                                     <div class="band-stripes">
-                                        {f.report.chunks[first..=last].iter()
-                                            .map(|c| view! { <i class=format!("k-{}", color_key(c))></i> })
+                                        {band_stripes(&f.report.chunks[first..=last], height)
+                                            .into_iter()
+                                            .map(|k| view! { <i class=format!("k-{k}")></i> })
                                             .collect_view()}
                                     </div>
                                 </div>

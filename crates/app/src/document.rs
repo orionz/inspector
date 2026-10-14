@@ -170,9 +170,9 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                                     Some(spans) => spans.iter().map(|(t, gone)| if *gone {
                                         view! { <del class="tomb">{t.clone()}</del> }.into_any()
                                     } else {
-                                        t.clone().into_any()
+                                        linkify(t).into_any()
                                     }).collect_view().into_any(),
-                                    None => text.clone().into_any(),
+                                    None => linkify(text).into_any(),
                                 },
                             }}
                             {(chars > text.chars().count()).then(|| "…")}
@@ -237,7 +237,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                     <pre class="json">
                         {match &base {
                             Some(Resp::Json { json: old, .. }) => diff_text(old, json).into_any(),
-                            _ => json.clone().into_any(),
+                            _ => linkify(json).into_any(),
                         }}
                         {cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}
                     </pre>
@@ -424,6 +424,29 @@ fn drag_moved(app: AppState, change: Option<usize>) -> Option<bool> {
     }
 }
 
+/// `text` with each `automerge:…` document URL made a link that opens it in a new inspector tab.
+fn linkify(text: &str) -> impl IntoView {
+    const B58: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut parts = vec![];
+    let mut rest = text;
+    while let Some(at) = rest.find("automerge:") {
+        let id_len = rest[at + 10..].find(|c: char| !B58.contains(c)).unwrap_or(rest.len() - at - 10);
+        if id_len < 20 {
+            parts.push(rest[..at + 10].to_string().into_any());
+            rest = &rest[at + 10..];
+            continue;
+        }
+        let url = &rest[at..at + 10 + id_len];
+        parts.push(rest[..at].to_string().into_any());
+        parts.push(view! {
+            <a class="am-link" href=format!("#doc={url}") target="_blank" rel="noopener" title="Open this document in a new inspector tab">{url.to_string()}</a>
+        }.into_any());
+        rest = &rest[at + url.len()..];
+    }
+    parts.push(rest.to_string().into_any());
+    parts.into_iter().collect_view()
+}
+
 /// A pane's name with its object id, e.g. `items 2@f018`.
 fn pane_title(title: &str, obj: &str) -> impl IntoView {
     let short = match obj.split_once('@') {
@@ -479,7 +502,7 @@ fn DocValue(entry: Entry, level: usize, in_list: bool) -> impl IntoView {
     let conflict = entry.conflict.then(|| view! { <span class="conflict" title="concurrent values; showing the winner">"⚡"</span> });
     match entry.value {
         Value::Scalar { text, kind } => view! {
-            <span class=format!("val v-{kind}") title=entry.origin>{text}</span>{conflict}
+            <span class=format!("val v-{kind}") title=entry.origin>{linkify(&text)}</span>{conflict}
         }
         .into_any(),
         Value::Object { id, kind, len } => {

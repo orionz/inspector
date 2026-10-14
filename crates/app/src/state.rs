@@ -98,6 +98,8 @@ pub struct AppState {
     pub doc_mode: RwSignal<DocMode>,
     /// Whether ops later than the shown version stay listed, struck through.
     pub tombstones: RwSignal<bool>,
+    /// For a document fetched from a sync server, how much of what it sent was kept.
+    pub fetched: RwSignal<Option<String>>,
 }
 
 impl AppState {
@@ -124,6 +126,7 @@ impl AppState {
             doc_path: RwSignal::new(Vec::new()),
             doc_mode: RwSignal::new(DocMode::Value),
             tombstones: RwSignal::new(false),
+            fetched: RwSignal::new(None),
         };
         state
     }
@@ -138,6 +141,7 @@ impl AppState {
         self.saved_sel.2.set(None);
         self.tab.set(Tab::Load);
         self.status.set(None);
+        self.fetched.set(None);
         self.doc.set(None);
         self.doc_path.set(Vec::new());
         self.saved.set(None);
