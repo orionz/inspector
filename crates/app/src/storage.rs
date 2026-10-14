@@ -241,7 +241,8 @@ fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
 }
 
 /// The file as a vertical stack of chunks. Hovering zooms out a panel over
-/// the chunk under the cursor, with its neighbours half-sized behind it;
+/// the chunk under the cursor, and over bands its neighbours half-sized
+/// behind it;
 /// clicking opens that chunk. Once a chunk is open the stack shrinks into a
 /// band at the left, and clicking the band closes the chunk.
 #[component]
@@ -253,6 +254,7 @@ fn ChunkStack() -> impl IntoView {
     let hovered = RwSignal::new(None::<usize>);
     let anchor = RwSignal::new(0.0);
     let zoom_h = RwSignal::new(DECK_MIN_H);
+    let on_band = RwSignal::new(false);
     let items = move || {
         app.file.with(|f| {
             let f = f.as_ref()?;
@@ -304,6 +306,7 @@ fn ChunkStack() -> impl IntoView {
             let k = rows.partition_point(|r| r.top <= y).saturating_sub(1);
             let r = &rows[k];
             anchor.set((r.top + r.bottom) / 2.0);
+            on_band.set(r.band);
             zoom_h.set(if r.band { DECK_MIN_H } else { (r.bottom - r.top) * DECK_GROW }.max(DECK_MIN_H));
             if hovered.get_untracked() != Some(k) {
                 hovered.set(Some(k));
@@ -358,7 +361,7 @@ fn ChunkStack() -> impl IntoView {
                     }
                 }>
                 {items}
-                <div class="deck" style:top=move || format!("{}px", anchor.get())
+                <div class="deck" class:solo=move || !on_band.get() style:top=move || format!("{}px", anchor.get())
                     style:--zh=move || zoom_h.get().to_string()>
                     <For each=deck key=|k| *k children=panel/>
                 </div>

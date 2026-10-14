@@ -194,6 +194,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .deck-panel.before2, .deck-panel.after2 { height: 0; left: 0; right: 0; z-index: 1; opacity: 0; padding: 0 12px; box-shadow: none; }
 .deck-panel.before2 { top: calc(var(--zh) * -.5px - 22px); }
 .deck-panel.after2 { top: calc(var(--zh) * .5px + 22px); }
+.deck.solo .deck-panel:not(.current) { opacity: 0; }
 .deck-line { display: flex; gap: 8px; align-items: center; overflow: hidden; text-overflow: ellipsis; }
 .deck-panel .idx { color: var(--dim); font-family: var(--mono); font-size: 11px; min-width: 4ch; }
 
