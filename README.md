@@ -21,9 +21,9 @@ The three views sit on folder tabs above the file area.
 - Clicking a chunk shows its parts: Header (actor count), Changes and Ops
   (row count and bytes), and Extra when a change carries bytes after its
   columns. Clicking a part opens its detail and shrinks the parts into a
-  second band beside the chunk band. In either band, click another chunk or
-  part to switch to it, or the open one to go back; clicking a band of small
-  chunks also goes back to the stack.
+  second band beside the chunk band. In any band, click another chunk, part
+  or column to switch to it, or the open one to go back one level; clicking a
+  band of small chunks goes back to the stack.
 - Header: facts (actors, heads, deps, seq/time/message, change-set fragment
   prefix counts, checksum) and a byte-layout bar of the whole chunk.
 - Changes and Ops get Physical / Logical tabs on the left edge:

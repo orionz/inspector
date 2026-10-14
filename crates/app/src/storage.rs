@@ -285,8 +285,8 @@ fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
 /// the chunk under the cursor, and over bands its neighbours half-sized
 /// behind it;
 /// clicking opens that chunk. Once a chunk is open the stack shrinks into a
-/// band at the left: clicking another chunk there opens it, and clicking the
-/// open chunk or a band of small chunks closes it.
+/// band at the left: clicking another chunk there opens it, clicking the
+/// open chunk goes back one level, and clicking a band of small chunks closes it.
 #[component]
 fn ChunkStack() -> impl IntoView {
     let app = expect_context::<AppState>();
@@ -413,6 +413,10 @@ fn ChunkStack() -> impl IntoView {
                         let block = target.and_then(|t| t.closest(".blk").ok().flatten());
                         match block.and_then(|b| b.get_attribute("data-i")).and_then(|i| i.parse().ok()) {
                             Some(i) if i != open => select_chunk(app, i),
+                            Some(_) if app.part.get_untracked().is_some() => {
+                                app.part.set(None);
+                                app.column.set(None);
+                            }
                             _ => close_chunk(app),
                         }
                         return;
@@ -519,10 +523,14 @@ fn ChunkDetail() -> impl IntoView {
                     view! {
                         <button class=format!("part s-{}", part_key(p)) class:sel=move || app.part.get() == Some(p)
                             style:--h=h.to_string()
-                            title=move || if app.part.get() == Some(p) { "Back to the chunk's parts" } else { "" }
+                            title=move || if app.part.get() == Some(p) { "Back one level" } else { "" }
                             on:click=move |_| {
-                                app.part.update(|cur| *cur = if *cur == Some(p) { None } else { Some(p) });
-                                app.column.set(None);
+                                if app.part.get_untracked() == Some(p) && app.column.get_untracked().is_some() {
+                                    app.column.set(None);
+                                } else {
+                                    app.part.update(|cur| *cur = if *cur == Some(p) { None } else { Some(p) });
+                                    app.column.set(None);
+                                }
                             }>
                             <span class="part-label">{part_label(c, p)}</span>
                             <span class="part-name">{part_name(p)}</span>
