@@ -1,10 +1,11 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use am_inspect::{parse_file, DocModel, FileReport};
+use am_inspect::{parse_structure, DocModel, FileReport};
 use automerge::{Automerge, ChangeHash, LoadOptions, ObjId, ObjType, OnPartialLoad};
 use leptos::prelude::*;
 
+#[derive(Clone)]
 pub struct Loaded {
     pub name: String,
     pub bytes: Vec<u8>,
@@ -32,6 +33,8 @@ pub enum DocMode {
     Value,
     /// The ops that built it.
     Ops,
+    /// It and everything below it as JSON.
+    Json,
 }
 
 /// An object opened in the document view, by the key that leads to it.
@@ -149,7 +152,7 @@ impl AppState {
             .set(Some(format!("Parsing {name} ({})…", crate::fmt::bytes(bytes.len()))));
         set_timeout(
             move || {
-                let report = parse_file(&bytes);
+                let report = parse_structure(&bytes);
                 self.column.set(None);
                 self.chunk.set(None);
                 self.part.set(None);
@@ -180,16 +183,29 @@ impl AppState {
                         });
                         if let Some(model) = model {
                             let n = model.as_ref().map(|m| m.changes.len()).unwrap_or(0);
+                            if let Ok(m) = &model {
+                                self.file.update(|f| {
+                                    if let Some(f) = f.as_mut().filter(|f| f.report.has_hidden_deps()) {
+                                        resolve_deps(&mut Rc::make_mut(f).report, m);
+                                    }
+                                });
+                            }
                             let saved = model.as_ref().ok().map(|m| {
                                 let bytes = m.doc.save();
-                                let report = parse_file(&bytes);
-                                let (_, ms) = timed(|| Automerge::load(&bytes));
-                                self.load_ms.1.set(Some(ms));
+                                let mut report = parse_structure(&bytes);
+                                resolve_deps(&mut report, m);
                                 Rc::new(Loaded { name: "doc.save()".into(), bytes, report })
                             });
                             self.saved.set(saved);
                             self.model.set(Some(Rc::new(model)));
                             self.step.set(n);
+                            set_timeout(
+                                move || {
+                                    let ms = self.saved.with_untracked(|s| s.as_ref().map(|s| timed(|| Automerge::load(&s.bytes)).1));
+                                    self.load_ms.1.set(ms);
+                                },
+                                Duration::from_millis(30),
+                            );
                         }
                         self.status.set(None);
                     },
@@ -199,6 +215,13 @@ impl AppState {
             Duration::from_millis(30),
         );
     }
+}
+
+/// Settles the dependencies that [`parse_structure`] left in order, using the
+/// changes automerge found inside the file's document chunks.
+fn resolve_deps(report: &mut FileReport, model: &DocModel) {
+    let bulk = report.first_bulk_chunk();
+    report.resolve_deps(|h| bulk.filter(|_| model.has_change(h)));
 }
 
 fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {

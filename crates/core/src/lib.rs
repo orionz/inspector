@@ -4,7 +4,7 @@ pub mod chunk;
 pub mod columns;
 pub mod leb;
 
-pub use chunk::{parse_file, Chunk, ChunkKind, DepOrder, FileReport, Section, SectionKind};
+pub use chunk::{parse_file, parse_structure, Chunk, ChunkKind, DepOrder, FileReport, Section, SectionKind};
 pub use columns::{ColumnGroup, ColumnInfo};
 pub mod doc;
 
@@ -43,6 +43,8 @@ mod tests {
                 let root_ops = m.object_ops(&automerge::ROOT).len();
                 let root_keys = m.page(&m.root(), None, 0, usize::MAX).total;
                 assert!(root_keys == 0 || root_ops > 0, "{path:?}: ROOT has keys but no ops");
+                let (json, _) = m.json(&automerge::ROOT, None, 1 << 20);
+                assert!(json.starts_with('{') && (json.len() > 1 << 20 || json.ends_with('}')), "{path:?}: bad JSON");
             }
             let shown: Vec<_> = changes_in_chunks.iter().take(6).collect();
             println!("{:?}: {summary}; per-chunk {:?}", path.file_name().unwrap(), shown);

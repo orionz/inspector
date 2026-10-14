@@ -62,9 +62,10 @@ The three views sit on folder tabs above the file area.
   entries at the left and opens the object beside it. In a band, click
   another object to switch to it, or the open one (or the band) to go back
   to that level. Hover a value for the change that set it.
-- Value / Ops tabs on the right edge: **Ops** shows the open object's ops
-  instead of its value, as logical rows (id, key, insert, Action, pred) in op
-  id order. The first Ops view decodes every change in the document.
+- Value / Ops / JSON tabs on the right edge: **Ops** shows the open object's
+  ops instead of its value, as logical rows (id, key, insert, Action, pred) in
+  op id order (the first Ops view decodes every change in the document);
+  **JSON** shows the open object and everything below it as indented JSON.
 
 **Save tab**
 - The Load tab's view of what `doc.save()` writes after loading the file
@@ -84,7 +85,10 @@ corpus/        sample files, also served as in-app samples
 web/           index.html, styles, service worker, manifest, icons
 ```
 
-The structural parser is independent of automerge's internals, so it reports
+Opening a file draws the chunk stack from the structural parse alone. A
+change whose dependency sits inside a document chunk (not at its heads) can
+only be placed once automerge has loaded the file, so those late/missing
+colours settle a moment later. The structural parser is independent of automerge's internals, so it reports
 exact byte offsets for every section, column and run, and still shows the
 structure of files automerge itself refuses to load. Document loading, history
 and op decoding use automerge's public API.

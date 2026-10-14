@@ -133,6 +133,40 @@ fn scalar(s: &ScalarValue) -> (String, &'static str) {
     }
 }
 
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn json_scalar(s: &ScalarValue) -> String {
+    match s {
+        ScalarValue::Str(v) => json_string(v),
+        ScalarValue::Int(v) => v.to_string(),
+        ScalarValue::Uint(v) => v.to_string(),
+        ScalarValue::F64(v) if v.is_finite() => v.to_string(),
+        ScalarValue::F64(_) => "null".into(),
+        ScalarValue::Counter(c) => format!("{c}"),
+        ScalarValue::Timestamp(t) => t.to_string(),
+        ScalarValue::Boolean(b) => b.to_string(),
+        ScalarValue::Bytes(b) => json_string(&hex::encode(b)),
+        ScalarValue::Unknown { bytes, .. } => json_string(&hex::encode(bytes)),
+        ScalarValue::Null => "null".into(),
+    }
+}
+
 impl DocModel {
     /// Loads every chunk of the file into one document; chunks whose
     /// dependencies are missing are ignored rather than failing the load.
@@ -282,6 +316,11 @@ impl DocModel {
         &actor[..actor.len().min(self.actor_prefix)]
     }
 
+    /// Whether the document holds the change with this hex hash.
+    pub fn has_change(&self, hex: &str) -> bool {
+        hex.parse::<ChangeHash>().is_ok_and(|h| self.by_hash.contains_key(&h))
+    }
+
     pub fn change_index(&self, hash: &ChangeHash) -> Option<usize> {
         self.by_hash.get(hash).copied()
     }
@@ -337,6 +376,76 @@ impl DocModel {
 
     pub fn root(&self) -> ObjId {
         ROOT
+    }
+
+    /// The object and everything below it as indented JSON, cut short once
+    /// it passes `limit` bytes; the flag says whether it was cut.
+    pub fn json(&self, obj: &ObjId, heads: Option<&[ChangeHash]>, limit: usize) -> (String, bool) {
+        let ty = self.doc.object_type(obj).unwrap_or(ObjType::Map);
+        let mut out = String::new();
+        self.write_json(&mut out, obj, ty, heads, 0, limit);
+        let cut = out.len() > limit;
+        (out, cut)
+    }
+
+    fn write_json(&self, out: &mut String, obj: &ObjId, ty: ObjType, heads: Option<&[ChangeHash]>, depth: usize, limit: usize) {
+        if out.len() > limit {
+            return;
+        }
+        let pad = |out: &mut String, d: usize| out.extend(std::iter::repeat_n("  ", d));
+        let value = |out: &mut String, v: Value<'_>, id: ObjId, d: usize| match v {
+            Value::Object(t) => self.write_json(out, &id, t, heads, d, limit),
+            Value::Scalar(s) => out.push_str(&json_scalar(&s)),
+        };
+        match ty {
+            ObjType::Text => out.push_str(&json_string(&self.text(obj, heads))),
+            ObjType::Map | ObjType::Table => {
+                let items: Vec<_> = match heads {
+                    Some(h) => self.doc.map_range_at(obj, .., h).map(|i| (i.key.to_string(), i.id(), i.value.into_value())).collect(),
+                    None => self.doc.map_range(obj, ..).map(|i| (i.key.to_string(), i.id(), i.value.into_value())).collect(),
+                };
+                if items.is_empty() {
+                    out.push_str("{}");
+                    return;
+                }
+                out.push_str("{\n");
+                let n = items.len();
+                for (k, (key, id, v)) in items.into_iter().enumerate() {
+                    if out.len() > limit {
+                        return;
+                    }
+                    pad(out, depth + 1);
+                    out.push_str(&json_string(&key));
+                    out.push_str(": ");
+                    value(out, v, id, depth + 1);
+                    out.push_str(if k + 1 < n { ",\n" } else { "\n" });
+                }
+                pad(out, depth);
+                out.push('}');
+            }
+            ObjType::List => {
+                let items: Vec<_> = match heads {
+                    Some(h) => self.doc.list_range_at(obj, .., h).map(|i| (i.id(), i.value.into_value())).collect(),
+                    None => self.doc.list_range(obj, ..).map(|i| (i.id(), i.value.into_value())).collect(),
+                };
+                if items.is_empty() {
+                    out.push_str("[]");
+                    return;
+                }
+                out.push_str("[\n");
+                let n = items.len();
+                for (k, (id, v)) in items.into_iter().enumerate() {
+                    if out.len() > limit {
+                        return;
+                    }
+                    pad(out, depth + 1);
+                    value(out, v, id, depth + 1);
+                    out.push_str(if k + 1 < n { ",\n" } else { "\n" });
+                }
+                pad(out, depth);
+                out.push(']');
+            }
+        }
     }
 
     pub fn text(&self, obj: &ObjId, heads: Option<&[ChangeHash]>) -> String {

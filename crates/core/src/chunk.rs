@@ -200,7 +200,27 @@ pub fn chunk_hash(kind: u8, data: &[u8]) -> [u8; 32] {
 
 /// Splits a file into chunks and parses each one's structure. Never fails:
 /// unreadable data is reported in `trailing` or a chunk's `error`.
+/// Splits a file into chunks and parses each one. Working out where a
+/// change's dependencies sit can mean a full automerge parse of the
+/// document chunks; [`parse_structure`] skips that.
 pub fn parse_file(bytes: &[u8]) -> FileReport {
+    let mut report = parse_structure(bytes);
+    if report.has_hidden_deps() {
+        let mut inside: HashMap<String, usize> = HashMap::new();
+        for c in report.chunks.iter().filter(|c| !is_change(c)) {
+            for change in crate::doc::chunk_changes(bytes, c).unwrap_or_default() {
+                inside.entry(change.hash().to_string()).or_insert(c.index);
+            }
+        }
+        report.resolve_deps(|h| inside.get(h).copied());
+    }
+    report
+}
+
+/// Like [`parse_file`], but a change depending on a change stored inside a
+/// document chunk (rather than at its heads) is marked in order until
+/// [`FileReport::resolve_deps`] says otherwise.
+pub fn parse_structure(bytes: &[u8]) -> FileReport {
     let mut chunks = Vec::new();
     let mut pos = 0;
     let mut trailing = None;
@@ -216,48 +236,70 @@ pub fn parse_file(bytes: &[u8]) -> FileReport {
             }
         }
     }
-    mark_dep_order(bytes, &mut chunks);
-    FileReport {
+    let mut report = FileReport {
         len: bytes.len(),
         chunks,
         trailing,
-    }
+    };
+    report.resolve_deps(|_| Some(0));
+    report
 }
 
 fn is_change(c: &Chunk) -> bool {
     matches!(c.kind, ChunkKind::Change | ChunkKind::Compressed) && c.error.is_none()
 }
 
-fn mark_dep_order(file: &[u8], chunks: &mut [Chunk]) {
-    let mut first_seen: HashMap<String, usize> = HashMap::new();
-    for c in chunks.iter().filter(|c| is_change(c)) {
-        first_seen.entry(c.hash_hex()).or_insert(c.index);
-    }
-    let unresolved = |seen: &HashMap<String, usize>, c: &Chunk| {
-        c.facts.deps.iter().any(|d| seen.get(d).is_none_or(|&j| j > c.index))
-    };
-    // Loading other chunk kinds means a full automerge parse, so only pay
-    // for it when some dependency isn't already found in an earlier change.
-    if chunks.iter().filter(|c| is_change(c)).any(|c| unresolved(&first_seen, c)) {
-        for c in chunks.iter().filter(|c| !is_change(c)) {
-            for change in crate::doc::chunk_changes(file, c).unwrap_or_default() {
-                let j = first_seen.entry(change.hash().to_string()).or_insert(c.index);
-                *j = (*j).min(c.index);
+impl FileReport {
+    /// Where each change hash first appears, from change chunks and the
+    /// heads of other chunks.
+    fn visible_hashes(&self) -> HashMap<String, usize> {
+        let mut first_seen: HashMap<String, usize> = HashMap::new();
+        for c in &self.chunks {
+            if is_change(c) {
+                first_seen.entry(c.hash_hex()).or_insert(c.index);
+            } else {
+                for h in &c.facts.heads {
+                    first_seen.entry(h.clone()).or_insert(c.index);
+                }
             }
         }
+        first_seen
     }
-    for c in chunks.iter_mut().filter(|c| is_change(c)) {
-        c.dep_order = c
-            .facts
-            .deps
+
+    /// Whether some change depends on a hash that only a full parse of the
+    /// document chunks could find.
+    pub fn has_hidden_deps(&self) -> bool {
+        let seen = self.visible_hashes();
+        self.chunks
             .iter()
-            .map(|d| match first_seen.get(d) {
-                None => DepOrder::Missing,
-                Some(&j) if j > c.index => DepOrder::Late,
-                Some(_) => DepOrder::InOrder,
-            })
-            .max()
-            .unwrap_or_default();
+            .filter(|c| is_change(c))
+            .any(|c| c.facts.deps.iter().any(|d| !seen.contains_key(d)))
+    }
+
+    /// Recomputes each change's [`DepOrder`]; `inside` gives the chunk
+    /// holding a dependency that isn't a change chunk or a chunk's head, or
+    /// `None` when it's nowhere in the file.
+    pub fn resolve_deps(&mut self, inside: impl Fn(&str) -> Option<usize>) {
+        let seen = self.visible_hashes();
+        for c in self.chunks.iter_mut().filter(|c| is_change(c)) {
+            c.dep_order = c
+                .facts
+                .deps
+                .iter()
+                .map(|d| match seen.get(d).copied().or_else(|| inside(d)) {
+                    None => DepOrder::Missing,
+                    Some(j) if j > c.index => DepOrder::Late,
+                    Some(_) => DepOrder::InOrder,
+                })
+                .max()
+                .unwrap_or_default();
+        }
+    }
+
+    /// The first chunk that isn't a change chunk, where changes found only by
+    /// loading the whole file must be stored.
+    pub fn first_bulk_chunk(&self) -> Option<usize> {
+        self.chunks.iter().find(|c| !is_change(c)).map(|c| c.index)
     }
 }
 

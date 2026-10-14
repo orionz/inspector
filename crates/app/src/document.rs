@@ -38,7 +38,7 @@ pub fn DocumentTab() -> impl IntoView {
                 };
                 view! {
                     <DocBrowser/>
-                    <nav class="side-tabs">{tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}</nav>
+                    <nav class="side-tabs">{tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}{tab(DocMode::Json, "JSON")}</nav>
                 }
                 .into_any()
             }
@@ -108,8 +108,21 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 .into_any()
             });
         }
-        if app.doc_mode.get() == DocMode::Ops {
-            return Some(view! { <ObjOps obj=obj.clone() title=title.clone()/> }.into_any());
+        match app.doc_mode.get() {
+            DocMode::Ops => return Some(view! { <ObjOps obj=obj.clone() title=title.clone()/> }.into_any()),
+            DocMode::Json => {
+                return with_model(app, |m| {
+                    let (json, cut) = m.json(&obj, heads, JSON_LIMIT);
+                    view! {
+                        <div class="card doc-pane text-pane">
+                            <div class="card-title"><b class="mono">{title.clone()}</b><span class="dim">"JSON"</span></div>
+                            <pre class="json">{json}{cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}</pre>
+                        </div>
+                    }
+                    .into_any()
+                });
+            }
+            DocMode::Value => {}
         }
         with_model(app, |m| {
             let header = |len: usize| view! {
@@ -173,6 +186,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
 }
 
 const OPS_PAGE: usize = 200;
+const JSON_LIMIT: usize = 2 << 20;
 
 /// The ops whose object is `obj`, as logical rows.
 #[component]
