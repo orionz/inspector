@@ -80,6 +80,8 @@ header.top {
   padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; white-space: nowrap; }
+.home { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; font-weight: inherit; cursor: pointer; }
+.home:hover span { color: var(--accent); }
 .version { font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--dim); }
 .logo { width: 22px; height: 22px; color: var(--accent); }
 .logo.big { width: 56px; height: 56px; }
@@ -207,9 +209,18 @@ tr.sel, .change-row.sel { background: var(--sel); }
   position: absolute; inset: 0; z-index: 2; display: grid; place-items: center;
   border: 0; border-radius: 6px; background: transparent; cursor: pointer;
 }
-.stack-close span { font-size: 28px; color: var(--text); opacity: 0; transition: opacity .12s; }
+.stack-close > span { transition: opacity .12s; }
+.stack-back { font-size: 28px; color: var(--text); opacity: 0; }
+.stack-title {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(180deg); opacity: 0;
+  writing-mode: vertical-rl; max-height: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 10px 3px; border-radius: 6px; background: color-mix(in srgb, var(--panel) 85%, transparent);
+  box-shadow: 0 0 0 1px var(--line); font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: .02em;
+}
 .stack-close:hover { background: color-mix(in srgb, var(--bg) 55%, transparent); }
-.stack-close:hover span { opacity: 1; }
+.stack-close:hover .stack-back { opacity: 1; }
+.stack-title.placed { opacity: 1; }
+.stack-close:hover .stack-title { opacity: 0; }
 .more { display: block; margin: 6px auto; }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 14px; margin-bottom: 10px; }

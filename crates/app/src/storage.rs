@@ -255,6 +255,21 @@ fn ChunkStack() -> impl IntoView {
     let anchor = RwSignal::new(0.0);
     let zoom_h = RwSignal::new(DECK_MIN_H);
     let on_band = RwSignal::new(false);
+    let title_el = NodeRef::<leptos::html::Span>::new();
+    let title_y = RwSignal::new(None::<f64>);
+    Effect::new(move |_| {
+        app.chunk.track();
+        title_y.set(None);
+        request_animation_frame(move || {
+            let (Some(Some(stack)), Some(Some(title))) = (stack_el.try_get_untracked(), title_el.try_get_untracked()) else { return };
+            let Ok(Some(sel)) = stack.query_selector(".sel") else { return };
+            let s = stack.get_bounding_client_rect();
+            let r = sel.get_bounding_client_rect();
+            let half = title.get_bounding_client_rect().height() / 2.0;
+            let mid = r.top() + r.height() / 2.0 - s.top();
+            title_y.try_set(Some(mid.clamp(half, (s.height() - half).max(half))));
+        });
+    });
     let items = move || {
         app.file.with(|f| {
             let f = f.as_ref()?;
@@ -370,7 +385,9 @@ fn ChunkStack() -> impl IntoView {
             <Show when=move || app.chunk.get().is_some()>
                 <button class="stack-close" title="Back to all chunks"
                     on:click=move |_| { app.chunk.set(None); app.column.set(None); }>
-                    <span>"‹"</span>
+                    <span class="stack-title" node_ref=title_el class:placed=move || title_y.get().is_some()
+                        style:top=move || title_y.get().map(|y| format!("{y}px"))>{move || with_chunk(app, |_, c| format!("{} #{}", c.kind.label(), c.index))}</span>
+                    <span class="stack-back">"‹"</span>
                 </button>
             </Show>
         </div>

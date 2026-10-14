@@ -108,8 +108,13 @@ fn Header() -> impl IntoView {
     view! {
         <header class="top">
             <div class="brand">
-                <svg viewBox="0 0 32 32" class="logo"><use href="#logo"/></svg>
-                <span>"Automerge Inspector"</span>
+                <button class="home" title="Back to the start page" on:click=move |_| {
+                    if let Some(i) = input.get() { i.set_value(""); }
+                    app.close();
+                }>
+                    <svg viewBox="0 0 32 32" class="logo"><use href="#logo"/></svg>
+                    <span>"Automerge Inspector"</span>
+                </button>
                 <span class="version" title=format!("build {APP_VERSION} · commit {APP_COMMIT}")>{APP_VERSION}</span>
             </div>
             <div class="file-summary">{summary}</div>

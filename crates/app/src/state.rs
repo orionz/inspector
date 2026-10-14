@@ -71,6 +71,16 @@ impl AppState {
         state
     }
 
+    /// Closes the open file and returns to the start page.
+    pub fn close(self) {
+        self.chunk.set(None);
+        self.column.set(None);
+        self.tab.set(Tab::Storage);
+        self.status.set(None);
+        self.model.set(None);
+        self.file.set(None);
+    }
+
     /// Parses the file in two phases so the storage view appears before the
     /// (much slower) full document load finishes.
     pub fn open(self, name: String, bytes: Vec<u8>) {
