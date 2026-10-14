@@ -100,6 +100,8 @@ pub struct AppState {
     pub tombstones: RwSignal<bool>,
     /// For a document fetched from a sync server, how much of what it sent was kept.
     pub fetched: RwSignal<Option<String>>,
+    /// Whether a raw column shows hexane's in-memory layout rather than its stored bytes.
+    pub in_memory: RwSignal<bool>,
 }
 
 impl AppState {
@@ -127,6 +129,7 @@ impl AppState {
             doc_mode: RwSignal::new(DocMode::Value),
             tombstones: RwSignal::new(false),
             fetched: RwSignal::new(None),
+            in_memory: RwSignal::new(false),
         };
         state
     }

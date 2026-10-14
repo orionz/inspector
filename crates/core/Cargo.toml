@@ -7,6 +7,7 @@ description = "Structural parser and storage analysis for automerge files"
 
 [dependencies]
 automerge = { workspace = true }
+hexane = { workspace = true, features = ["debug"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 sha2 = "0.10"
 hex = "0.4"

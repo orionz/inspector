@@ -3,6 +3,7 @@
 pub mod chunk;
 pub mod columns;
 pub mod leb;
+pub mod memory;
 
 pub use chunk::{parse_file, parse_structure, Chunk, ChunkKind, DepOrder, FileReport, Section, SectionKind};
 pub use columns::{ColumnGroup, ColumnInfo};
