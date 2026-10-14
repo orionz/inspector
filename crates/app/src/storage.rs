@@ -150,53 +150,6 @@ fn select_chunk(app: AppState, index: usize) {
     window().scroll_to_with_x_and_y(0.0, 0.0);
 }
 
-/// The file as a vertical stack of chunks. Once a chunk is open it shrinks
-/// into a band at the left; clicking the band closes the chunk.
-#[component]
-fn ChunkStack() -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let stack = move || {
-        app.file.with(|f| {
-            let f = f.as_ref()?;
-            let total = f.report.len.max(1);
-            let layout = stack_layout(&f.report.chunks, total);
-            Some(
-                layout
-                    .items
-                    .into_iter()
-                    .map(|item| {
-                        let h = item.height();
-                        match item {
-                            StackItem::Block { index, .. } => {
-                                view! { <ChunkBlock chunk=f.report.chunks[index].clone() file_len=total height=h/> }.into_any()
-                            }
-                            StackItem::Bands { first, last } => {
-                                let chunks = f.report.chunks[first..=last].to_vec();
-                                view! { <ChunkBands chunks=chunks file_len=total height=h/> }.into_any()
-                            }
-                        }
-                    })
-                    .collect_view(),
-            )
-        })
-    };
-    view! {
-        <div class="stack-wrap">
-            <div class="stack-head">
-                <TypeSummary/>
-                <ScaleNote/>
-            </div>
-            <div class="stack">{stack}</div>
-            <Show when=move || app.chunk.get().is_some()>
-                <button class="stack-close" title="Back to all chunks"
-                    on:click=move |_| { app.chunk.set(None); app.column.set(None); }>
-                    <span>"‹"</span>
-                </button>
-            </Show>
-        </div>
-    }
-}
-
 fn chunk_stats(c: &Chunk, file_len: usize) -> String {
     let mut parts = vec![
         format!("{} B", fmt::count_exact(c.len())),
@@ -216,29 +169,8 @@ fn chunk_stats(c: &Chunk, file_len: usize) -> String {
     parts.join(" · ")
 }
 
-fn chunk_flag(c: &Chunk) -> Option<impl IntoView> {
-    (!c.checksum_ok || c.error.is_some()).then(|| view! { <span class="bad" title="checksum mismatch or parse error">"!"</span> })
-}
-
-#[component]
-fn ChunkBlock(chunk: Chunk, file_len: usize, height: f64) -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let i = chunk.index;
-    view! {
-        <button class=format!("blk k-{}", chunk.kind.key())
-            class:sel=move || app.chunk.get() == Some(i)
-            style:--h=height.to_string()
-            on:click=move |_| select_chunk(app, i)>
-            <span class="blk-label">
-                <span class="idx">{format!("#{i}")}</span>
-                <span class=format!("chip k-{}", chunk.kind.key())>{chunk.kind.label()}</span>
-                {chunk_flag(&chunk)}
-            </span>
-            <span class="blk-stats">{chunk_stats(&chunk, file_len)}</span>
-        </button>
-    }
-}
-
+/// Gap between stack items; matches `.stack { gap }`.
+const STACK_GAP: f64 = 2.0;
 /// How many neighbouring panels are kept either side of the hovered chunk.
 const DECK_REACH: usize = 2;
 
@@ -246,95 +178,190 @@ fn band_pitch(n: usize) -> f64 {
     BAND_PITCH.min(MAX_BANDS_H / n as f64)
 }
 
-/// A run of tiny chunks drawn one thin band each. Hovering shows a panel for
-/// the chunk under the cursor, with its neighbours half-sized behind it;
-/// clicking opens it.
-#[component]
-fn ChunkBands(chunks: Vec<Chunk>, file_len: usize, height: f64) -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let hovered = RwSignal::new(None::<usize>);
-    let n = chunks.len();
-    let first = chunks[0].index;
-    let last = chunks[n - 1].index;
-    let pitch = band_pitch(n);
-    let kinds: Vec<&'static str> = chunks.iter().map(|c| c.kind.key()).collect();
-    let chunks = std::sync::Arc::new(chunks);
-    let at_cursor = move |ev: leptos::ev::MouseEvent| {
-        if app.chunk.get_untracked().is_some() {
-            return None;
-        }
-        Some(((ev.offset_y() as f64 / pitch) as usize).min(n - 1))
-    };
-    let panel = {
-        let chunks = chunks.clone();
-        move |k: usize| {
-            let c = &chunks[k];
-            let context = match &c.facts.change {
-                Some(h) => format!(
-                    "{} · actor {}{}",
-                    format_time(h.time),
-                    fmt::short(&h.actor, 12),
-                    h.message.as_ref().map(|m| format!(" · “{m}”")).unwrap_or_default()
-                ),
-                None => format!("bytes {}..{}", c.range.start, c.range.end),
-            };
-            let kind = c.kind.key();
-            let class = move || {
-                let role = match hovered.get().map(|h| k as isize - h as isize).unwrap_or(0) {
-                    ..=-2 => "before2",
-                    -1 => "before",
-                    0 => "current",
-                    1 => "after",
-                    _ => "after2",
-                };
-                format!("band-panel k-{kind} {role}")
-            };
-            view! {
-                <div class=class>
-                    <div class="band-panel-line">
-                        <span class="idx">{format!("#{}", c.index)}</span>
-                        <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
-                        <span>{chunk_stats(c, file_len)}</span>
-                        {chunk_flag(c)}
-                        <span class="spacer"></span>
-                        <span class="dim small">{format!("{} of {n}", k + 1)}</span>
-                    </div>
-                    <div class="band-panel-line dim">{context}</div>
-                </div>
+/// Where a chunk sits in the stack, for finding the chunk under the cursor.
+struct HitRow {
+    top: f64,
+    bottom: f64,
+    band: bool,
+}
+
+fn hit_rows(layout: &StackLayout) -> Vec<HitRow> {
+    let mut rows = vec![];
+    let mut y = 0.0;
+    for item in &layout.items {
+        let h = item.height();
+        match *item {
+            StackItem::Block { .. } => rows.push(HitRow { top: y, bottom: y + h, band: false }),
+            StackItem::Bands { first, last } => {
+                let pitch = band_pitch(last - first + 1);
+                for i in 0..=last - first {
+                    let top = y + i as f64 * pitch;
+                    rows.push(HitRow { top, bottom: top + pitch, band: true });
+                }
             }
         }
+        y += h + STACK_GAP;
+    }
+    rows
+}
+
+/// What the hover deck shows for one chunk.
+#[derive(Clone)]
+struct ChunkCard {
+    index: usize,
+    kind: &'static str,
+    label: String,
+    stats: String,
+    context: String,
+    flagged: bool,
+}
+
+fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
+    let context = match &c.facts.change {
+        Some(h) => format!(
+            "{} · actor {}{}",
+            format_time(h.time),
+            fmt::short(&h.actor, 12),
+            h.message.as_ref().map(|m| format!(" · “{m}”")).unwrap_or_default()
+        ),
+        None => format!("bytes {}..{}", c.range.start, c.range.end),
     };
-    // The hovered chunk plus two neighbours each side, keyed by chunk so a
-    // panel keeps its element (and animates) as it moves between roles.
+    ChunkCard {
+        index: c.index,
+        kind: c.kind.key(),
+        label: c.kind.label(),
+        stats: chunk_stats(c, file_len),
+        context,
+        flagged: !c.checksum_ok || c.error.is_some(),
+    }
+}
+
+/// The file as a vertical stack of chunks. Hovering zooms out a panel for
+/// the chunk under the cursor, with its neighbours half-sized behind it;
+/// clicking opens that chunk. Once a chunk is open the stack shrinks into a
+/// band at the left, and clicking the band closes the chunk.
+#[component]
+fn ChunkStack() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let stack_el = NodeRef::<leptos::html::Div>::new();
+    let rows = StoredValue::new(Vec::<HitRow>::new());
+    let cards = StoredValue::new(Vec::<ChunkCard>::new());
+    let hovered = RwSignal::new(None::<usize>);
+    let anchor = RwSignal::new(0.0);
+    let items = move || {
+        app.file.with(|f| {
+            let f = f.as_ref()?;
+            let total = f.report.len.max(1);
+            let layout = stack_layout(&f.report.chunks, total);
+            rows.set_value(hit_rows(&layout));
+            cards.set_value(f.report.chunks.iter().map(|c| chunk_card(c, total)).collect());
+            Some(
+                layout
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        let h = item.height().to_string();
+                        match item {
+                            StackItem::Block { index, .. } => view! {
+                                <div class=format!("blk k-{}", f.report.chunks[index].kind.key())
+                                    class:sel=move || app.chunk.get() == Some(index)
+                                    style:--h=h></div>
+                            }
+                            .into_any(),
+                            StackItem::Bands { first, last } => view! {
+                                <div class="bands"
+                                    class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
+                                    style:--h=h>
+                                    <div class="band-stripes">
+                                        {f.report.chunks[first..=last].iter()
+                                            .map(|c| view! { <i class=format!("k-{}", c.kind.key())></i> })
+                                            .collect_view()}
+                                    </div>
+                                </div>
+                            }
+                            .into_any(),
+                        }
+                    })
+                    .collect_view(),
+            )
+        })
+    };
+    let track = move |ev: leptos::ev::MouseEvent| {
+        if app.chunk.get_untracked().is_some() {
+            return;
+        }
+        let Some(el) = stack_el.get_untracked() else { return };
+        let y = ev.client_y() as f64 - el.get_bounding_client_rect().top();
+        rows.with_value(|rows| {
+            if rows.is_empty() {
+                return;
+            }
+            let k = rows.partition_point(|r| r.top <= y).saturating_sub(1);
+            let r = &rows[k];
+            anchor.set(if r.band { (r.top + r.bottom) / 2.0 } else { y.clamp(r.top, r.bottom) });
+            if hovered.get_untracked() != Some(k) {
+                hovered.set(Some(k));
+            }
+        });
+    };
+    // Panels are keyed by chunk so each keeps its element, and animates, as
+    // it moves between roles.
     let deck = move || match hovered.get() {
-        Some(k) => (k.saturating_sub(DECK_REACH)..(k + DECK_REACH + 1).min(n)).collect(),
+        Some(k) => (k.saturating_sub(DECK_REACH)..(k + DECK_REACH + 1).min(cards.with_value(|c| c.len()))).collect(),
         None => vec![],
     };
+    let panel = move |k: usize| {
+        let card = cards.with_value(|c| c[k].clone());
+        let kind = card.kind;
+        let class = move || {
+            let role = match hovered.get().map(|h| k as isize - h as isize).unwrap_or(0) {
+                ..=-2 => "before2",
+                -1 => "before",
+                0 => "current",
+                1 => "after",
+                _ => "after2",
+            };
+            format!("deck-panel k-{kind} {role}")
+        };
+        view! {
+            <div class=class>
+                <div class="deck-line">
+                    <span class="idx">{format!("#{}", card.index)}</span>
+                    <span class=format!("chip k-{kind}")>{card.label}</span>
+                    <span>{card.stats}</span>
+                    {card.flagged.then(|| view! { <span class="bad" title="checksum mismatch or parse error">"!"</span> })}
+                </div>
+                <div class="deck-line dim">{card.context}</div>
+            </div>
+        }
+    };
     view! {
-        <div class="bands"
-            class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
-            class:hovering=move || hovered.get().is_some()
-            style:--h=height.to_string()
-            on:mousemove=move |ev| {
-                let k = at_cursor(ev);
-                if hovered.get_untracked() != k {
-                    hovered.set(k);
-                }
-            }
-            on:mouseleave=move |_| hovered.set(None)
-            on:click=move |ev| {
-                if let Some(k) = at_cursor(ev) {
-                    hovered.set(None);
-                    select_chunk(app, chunks[k].index);
-                }
-            }>
-            <div class="band-stripes">
-                {kinds.into_iter().map(|k| view! { <i class=format!("k-{k}")></i> }).collect_view()}
+        <div class="stack-wrap">
+            <div class="stack-head">
+                <TypeSummary/>
+                <ScaleNote/>
             </div>
-            <div class="band-deck"
-                style:top=move || hovered.get().map(|k| format!("{}px", k as f64 * pitch + pitch / 2.0))>
-                <For each=deck key=|k| *k children=panel/>
+            <div class="stack" node_ref=stack_el
+                on:mousemove=track
+                on:mouseleave=move |_| hovered.set(None)
+                on:click=move |ev| {
+                    track(ev);
+                    if let Some(k) = hovered.get_untracked() {
+                        hovered.set(None);
+                        select_chunk(app, k);
+                    }
+                }>
+                {items}
+                <div class="deck" style:top=move || format!("{}px", anchor.get())>
+                    <For each=deck key=|k| *k children=panel/>
+                </div>
             </div>
+            <Show when=move || app.chunk.get().is_some()>
+                <button class="stack-close" title="Back to all chunks"
+                    on:click=move |_| { app.chunk.set(None); app.column.set(None); }>
+                    <span>"‹"</span>
+                </button>
+            </Show>
         </div>
     }
 }

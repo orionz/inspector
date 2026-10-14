@@ -9,10 +9,11 @@ in its history. Everything runs locally in the browser.
 **Storage tab**
 - The file as a vertical stack of chunks, coloured by type (document, change,
   compressed change, change set, v0 bundle). Block height follows chunk size,
-  on a log scale when sizes differ by more than 8×. Runs of chunks around 1%
-  of the file or smaller collapse into thin bands, which expand into a chunk
-  list on hover. Exact bytes, share of file, changes and ops appear on hover.
-  Per-type totals sit above the stack.
+  on a log scale when sizes differ by more than 8×; runs of chunks around 1%
+  of the file or smaller are drawn as 3px bands, one per chunk. Hovering
+  anywhere zooms out a panel for the chunk under the cursor (bytes, share of
+  file, changes, ops, time, actor, message) with its neighbours half-sized
+  behind it. Per-type totals sit above the stack.
 - Clicking a chunk opens its detail and shrinks the stack into a band on the
   left; clicking the band returns to the stack.
 - For the selected chunk: header facts (actors, heads, deps, seq/time/message,
