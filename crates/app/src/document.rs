@@ -37,6 +37,7 @@ pub fn DocumentTab() -> impl IntoView {
                     </button>
                 };
                 view! {
+                    <Scrubber/>
                     <DocBrowser/>
                     <nav class="side-tabs">{tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}{tab(DocMode::Json, "JSON")}</nav>
                 }
@@ -52,7 +53,7 @@ pub fn DocumentTab() -> impl IntoView {
 fn DocBrowser() -> impl IntoView {
     let app = expect_context::<AppState>();
     let levels = move || {
-        let root = Crumb { key: "ROOT".into(), id: ROOT, ty: ObjType::Map, len: 0 };
+        let root = Crumb { key: "/".into(), id: ROOT, ty: ObjType::Map, len: 0 };
         std::iter::once(root).chain(app.doc_path.get()).enumerate().collect::<Vec<_>>()
     };
     view! {
@@ -115,7 +116,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                     let (json, cut) = m.json(&obj, heads, JSON_LIMIT);
                     view! {
                         <div class="card doc-pane text-pane">
-                            <div class="card-title"><b class="mono">{title.clone()}</b><span class="dim">"JSON"</span></div>
+                            <div class="card-title">{pane_title(&title, &obj)}<span class="dim">"JSON"</span></div>
                             <pre class="json">{json}{cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}</pre>
                         </div>
                     }
@@ -126,7 +127,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
         }
         with_model(app, |m| {
             let header = |len: usize| view! {
-                <div class="card-title"><b class="mono">{title.clone()}</b><span class="dim">{obj_label(ty, len)}</span></div>
+                <div class="card-title">{pane_title(&title, &obj)}<span class="dim">{obj_label(ty, len)}</span></div>
             };
             if ty == ObjType::Text {
                 let text = m.text(&obj, heads);
@@ -201,10 +202,9 @@ fn ObjOps(obj: automerge::ObjId, title: String) -> impl IntoView {
             let rows = ops[first..(first + OPS_PAGE).min(total)].iter().map(|op| {
                 let (_, origin) = origin_label(app, op.change);
                 view! {
-                    <tr title=origin>
+                    <tr title=origin class:future=op.change.is_some_and(|c| c >= app.step.get())>
                         <td>{op.id.clone()}</td>
                         <td>{op.key.clone()}</td>
-                        <td>{if op.insert { "t" } else { "f" }}</td>
                         <td>{op.action.clone()}</td>
                         <td>{op.pred.clone()}</td>
                     </tr>
@@ -214,7 +214,7 @@ fn ObjOps(obj: automerge::ObjId, title: String) -> impl IntoView {
             view! {
                 <div class="card doc-pane">
                     <div class="card-title">
-                        <b class="mono">{title.clone()}</b>
+                        {pane_title(&title, &obj)}
                         <span class="dim">{format!("{} ops", fmt::count_exact(total))}</span>
                         {(pages > 1).then(|| view! {
                             <span class="pager">
@@ -225,12 +225,58 @@ fn ObjOps(obj: automerge::ObjId, title: String) -> impl IntoView {
                         })}
                     </div>
                     <table class="dense rows mono">
-                        <thead><tr><th>"id"</th><th>"key"</th><th>"insert"</th><th>"Action"</th><th>"pred"</th></tr></thead>
+                        <thead><tr><th>"id"</th><th>"key"</th><th>"Action"</th><th>"pred"</th></tr></thead>
                         <tbody>{rows}</tbody>
                     </table>
                 </div>
             }
         })
+    }
+}
+
+/// A pane's name with its object id, e.g. `items 2@f018`.
+fn pane_title(title: &str, obj: &automerge::ObjId) -> impl IntoView {
+    let full = obj.to_string();
+    let short = match full.split_once('@') {
+        Some((ctr, actor)) => format!("{ctr}@{}", &actor[..actor.len().min(4)]),
+        None => "ROOT".into(),
+    };
+    view! { <b class="mono">{title.to_string()}</b><span class="mono obj-id" title=full>{short}</span> }
+}
+
+/// A bar across the top of the document: dragging it shows the document as
+/// it was after that many changes.
+#[component]
+fn Scrubber() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let n = with_model_untracked(app, |m| m.changes.len()).unwrap_or(0);
+    let pending = StoredValue::new(None::<usize>);
+    let on_input = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev).parse().unwrap_or(n);
+        let idle = pending.get_value().is_none();
+        pending.set_value(Some(v));
+        if idle {
+            request_animation_frame(move || {
+                if let Some(v) = pending.get_value() {
+                    pending.set_value(None);
+                    app.step.set(v);
+                }
+            });
+        }
+    };
+    let label = move || {
+        let k = app.step.get();
+        with_model(app, |m| match k {
+            0 => format!("0 / {n} changes"),
+            k if k >= n => format!("{n} / {n} changes · now"),
+            k => format!("{k} / {n} changes · {}", format_time(m.changes[k - 1].time)),
+        })
+    };
+    view! {
+        <div class="scrubber">
+            <input type="range" min="0" max=n.to_string() prop:value=move || app.step.get().to_string() on:input=on_input/>
+            <span>{label}</span>
+        </div>
     }
 }
 

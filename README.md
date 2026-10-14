@@ -33,8 +33,8 @@ The three views sit on folder tabs above the file area.
   - **Logical**: the columns recombined into rows (change `extra` bytes as
     a hex slice, `[]` or `[01 05 …]`): id first, op ids as
     `ctr@abcd` with the actor's first four hex digits, `ROOT` for the root
-    object, insert as `t`/`f`, the action and value as one column
-    (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
+    object, the action, value and insert flag as one column (`Make Map`,
+    `Set "cow"`, `Inc 27`, or `Insert Map` / `Insert "cow"` for list inserts) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
 - Physical has Grouped / Raw tabs over the columns. **Grouped** boxes each
   field, naming the ones made of several columns (`Obj` = `obj.actor` +
@@ -55,7 +55,9 @@ The three views sit on folder tabs above the file area.
   encoded bytes.
 
 **Document tab**
-- The document one object at a time, starting at ROOT: a map lists its keys
+- A timeline bar across the top: drag it to see the document as it was after
+  any number of changes.
+- The document one object at a time, starting at `/` (the root): a map lists its keys
   and values, a list wraps its values as `[ v1, v2, … ]`, and text shows its
   string and marks. Nested objects appear as chips (`{map 12}`,
   `[list 3]`); clicking one squashes the current pane into a band of its
@@ -63,8 +65,9 @@ The three views sit on folder tabs above the file area.
   another object to switch to it, or the open one (or the band) to go back
   to that level. Hover a value for the change that set it.
 - Value / Ops / JSON tabs on the right edge: **Ops** shows the open object's
-  ops instead of its value, as logical rows (id, key, insert, Action, pred) in
-  op id order (the first Ops view decodes every change in the document);
+  ops instead of its value, as logical rows (id, key, Action, pred) in
+  op id order, striking through ops not yet made at the timeline's position
+  (the first Ops view decodes every change in the document);
   **JSON** shows the open object and everything below it as indented JSON.
 
 **Save tab**

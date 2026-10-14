@@ -804,20 +804,39 @@ pub const ACTIONS: [&str; 8] = [
     "makeMap", "set", "makeList", "del", "makeText", "inc", "makeTable", "mark",
 ];
 
+/// An op's action as the inspector shows it: `Make Map`, `Set 5`, `Del`,
+/// `Inc 2`, with `Insert` in place of `Make`/`Set` for inserted list elements.
+pub fn action_label(action: &str, insert: bool, value: Option<&str>) -> String {
+    let with = |name: &str| match value {
+        Some(v) => format!("{name} {v}"),
+        None => name.to_string(),
+    };
+    match action.strip_prefix("make") {
+        Some(ty) if insert => format!("Insert {ty}"),
+        Some(ty) => format!("Make {ty}"),
+        None => match action {
+            "set" if insert => with("Insert"),
+            "del" => "Del".into(),
+            a => with(&(a[..1].to_uppercase() + &a[1..])),
+        },
+    }
+}
+
 /// A column of the logical view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShownCol {
     Field(usize),
-    /// An op's action with its value, e.g. `Set "cow"` or `Inc 27`.
-    Action { action: usize, value: Option<usize> },
+    /// An op's action with its value and insert flag, e.g. `Set "cow"`,
+    /// `Insert "cow"`, `Make Map` or `Inc 27`.
+    Action { action: usize, value: Option<usize>, insert: Option<usize> },
 }
 
 impl RowTable {
     /// The columns of the logical view in reading order: `id` before `obj`,
-    /// and `action` merged with `value` into one `Action` column.
+    /// and `action`, `value` and `insert` merged into one `Action` column.
     pub fn shown(&self) -> Vec<(String, ShownCol)> {
         let pos = |n: &str| self.fields.iter().position(|f| f.name == n);
-        let (action, value) = (pos("action"), pos("value"));
+        let (action, value, insert) = (pos("action"), pos("value"), pos("insert"));
         let mut order: Vec<usize> = (0..self.fields.len()).collect();
         if let (Some(id), Some(obj)) = (pos("id"), pos("obj")) {
             if id > obj {
@@ -827,9 +846,9 @@ impl RowTable {
         }
         order
             .into_iter()
-            .filter_map(|i| match (action, value) {
-                (Some(a), v) if i == a => Some(("Action".to_string(), ShownCol::Action { action: a, value: v })),
-                (Some(_), Some(v)) if i == v => None,
+            .filter_map(|i| match action {
+                Some(a) if i == a => Some(("Action".to_string(), ShownCol::Action { action: a, value, insert })),
+                Some(_) if Some(i) == value || Some(i) == insert => None,
                 _ => Some((self.fields[i].name.clone(), ShownCol::Field(i))),
             })
             .collect()
@@ -839,23 +858,16 @@ impl RowTable {
     pub fn render_shown(&self, col: ShownCol, row: usize, actors: &[String]) -> String {
         match col {
             ShownCol::Field(i) => self.fields[i].render_with(row, actors),
-            ShownCol::Action { action, value } => {
+            ShownCol::Action { action, value, insert } => {
                 let FieldData::Scalar(v) = &self.fields[action].data else {
                     return self.fields[action].render_with(row, actors);
                 };
                 let Some(a) = v.get(row).and_then(Cell::as_u64) else {
                     return String::new();
                 };
-                let name = match ACTIONS.get(a as usize) {
-                    Some(n) if n.starts_with("make") => return n.to_string(),
-                    Some(&"del") => return "Del".into(),
-                    Some(n) => n[..1].to_uppercase() + &n[1..],
-                    None => format!("action{a}"),
-                };
-                match value.map(|v| self.fields[v].render_with(row, actors)) {
-                    Some(v) if !v.is_empty() => format!("{name} {v}"),
-                    _ => name,
-                }
+                let inserted = insert.is_some_and(|i| self.fields[i].render_with(row, actors) == "t");
+                let value = value.map(|v| self.fields[v].render_with(row, actors)).filter(|v| !v.is_empty());
+                action_label(ACTIONS.get(a as usize).copied().unwrap_or("?"), inserted, value.as_deref())
             }
         }
     }

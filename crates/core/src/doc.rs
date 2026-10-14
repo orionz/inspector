@@ -6,7 +6,7 @@ use automerge::{
 };
 
 use crate::chunk::{Chunk, ChunkKind};
-use crate::columns::truncate;
+use crate::columns::{action_label, truncate};
 
 #[derive(Debug, Clone)]
 pub struct ChangeMeta {
@@ -54,7 +54,7 @@ pub struct ObjOp {
     pub id: String,
     pub key: String,
     pub insert: bool,
-    /// The action with its value, e.g. `makeMap`, `Set "cow"` or `Inc 2`.
+    /// The action with its value, e.g. `Make Map`, `Insert "cow"` or `Inc 2`.
     pub action: String,
     pub pred: String,
     /// Index into [`DocModel::changes`] of the change holding the op.
@@ -279,10 +279,10 @@ impl DocModel {
                 for (i, op) in c.operations.iter().enumerate() {
                     let ctr = c.start_op.get() + i as u64;
                     let action = match &op.action {
-                        OpType::Make(t) => format!("make{t:?}"),
-                        OpType::Delete => "Del".into(),
-                        OpType::Increment(n) => format!("Inc {n}"),
-                        OpType::Put(v) => format!("Set {}", scalar(v).0),
+                        OpType::Make(t) => action_label(&format!("make{t:?}"), op.insert, None),
+                        OpType::Delete => action_label("del", op.insert, None),
+                        OpType::Increment(n) => action_label("inc", op.insert, Some(&n.to_string())),
+                        OpType::Put(v) => action_label("set", op.insert, Some(&scalar(v).0)),
                         OpType::MarkBegin(m) => format!("Mark {}={}", m.name, scalar(&m.value).0),
                         OpType::MarkEnd(_) => "Mark end".into(),
                     };
