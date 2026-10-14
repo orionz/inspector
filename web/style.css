@@ -429,6 +429,9 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .side-tabs button span { display: inline-block; writing-mode: vertical-rl; }
 .side-tabs button:hover { color: var(--text); filter: none; }
 .side-tabs button.active { width: 38px; margin-left: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
+.side-check { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 36px; margin-top: 10px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.side-check span { writing-mode: vertical-rl; }
+.side-check:hover { color: var(--text); }
 .col-strip { display: flex; gap: 8px; align-items: flex-start; overflow-x: auto; padding: 4px 4px 8px; }
 .strip-col { display: flex; flex-direction: column-reverse; justify-content: flex-end; align-items: center; width: 26px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
 .strip-group { display: flex; flex-direction: column; border-radius: 5px; cursor: pointer; }

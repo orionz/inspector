@@ -96,6 +96,8 @@ pub struct AppState {
     /// Objects opened in the document view, from just below the root.
     pub doc_path: RwSignal<Vec<Crumb>>,
     pub doc_mode: RwSignal<DocMode>,
+    /// Whether ops later than the shown version stay listed, struck through.
+    pub tombstones: RwSignal<bool>,
 }
 
 impl AppState {
@@ -121,6 +123,7 @@ impl AppState {
             drag_from: RwSignal::new(None),
             doc_path: RwSignal::new(Vec::new()),
             doc_mode: RwSignal::new(DocMode::Value),
+            tombstones: RwSignal::new(false),
         };
         state
     }

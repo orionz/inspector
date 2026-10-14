@@ -85,7 +85,7 @@ pub enum Req {
     Page { obj: String, step: usize, limit: usize },
     Text { obj: String, step: usize, limit_chars: usize },
     Json { obj: String, step: usize, limit: usize },
-    Ops { obj: String, start: usize, limit: usize },
+    Ops { obj: String, upto: Option<usize>, start: usize, limit: usize },
     ChangeTime { index: usize },
 }
 
@@ -222,8 +222,12 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
             let (json, cut) = m.json(&obj_of(&obj), heads.as_deref(), limit);
             Resp::Json { json, cut }
         }
-        Req::Ops { obj, start, limit } => {
-            let all = m.object_ops(&obj_of(&obj));
+        Req::Ops { obj, upto, start, limit } => {
+            let all: Vec<_> = m
+                .object_ops(&obj_of(&obj))
+                .iter()
+                .filter(|op| upto.is_none_or(|u| op.change.is_none_or(|c| c < u)))
+                .collect();
             let ops = all
                 .iter()
                 .skip(start)

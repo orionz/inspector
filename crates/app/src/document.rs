@@ -24,7 +24,14 @@ pub fn DocumentTab() -> impl IntoView {
                 view! {
                     <Scrubber changes=changes/>
                     <DocBrowser/>
-                    <nav class="side-tabs">{tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}{tab(DocMode::Json, "JSON")}</nav>
+                    <nav class="side-tabs">
+                        {tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}{tab(DocMode::Json, "JSON")}
+                        <label class="side-check" title="Keep ops after this version, struck through">
+                            <input type="checkbox" prop:checked=move || app.tombstones.get()
+                                on:change=move |ev| app.tombstones.set(event_target_checked(&ev))/>
+                            <span>"show tombstones"</span>
+                        </label>
+                    </nav>
                 }
                 .into_any()
             }
@@ -78,7 +85,10 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
             }
             let (obj, step) = (obj.clone(), app.step.get());
             Some(match app.doc_mode.get() {
-                DocMode::Ops => Req::Ops { obj, start: ops_page.get() * OPS_PAGE, limit: OPS_PAGE },
+                DocMode::Ops => {
+                    let upto = (!app.tombstones.get()).then(|| app.drag_from.get().map_or(step, |f| f.max(step)));
+                    Req::Ops { obj, upto, start: ops_page.get() * OPS_PAGE, limit: OPS_PAGE }
+                }
                 DocMode::Json => Req::Json { obj, step, limit: JSON_LIMIT },
                 DocMode::Value if kind == ObjKind::Text => Req::Text { obj, step, limit_chars: text_chars.get() },
                 DocMode::Value => Req::Page { obj, step, limit: limit.get() },
@@ -233,7 +243,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                     let change = op.change;
                     view! {
                         <tr title=op.origin.clone()
-                            class:future=move || change.is_some_and(|c| c >= app.step.get())
+                            class:future=move || change.is_some_and(|c| c >= app.step.get()) && drag_moved(app, change).is_none()
                             class:diff-add=move || drag_moved(app, change) == Some(true)
                             class:diff-del=move || drag_moved(app, change) == Some(false)>
                             <td>{op.id.clone()}</td>
