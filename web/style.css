@@ -339,7 +339,7 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 
 /* ---- chunk parts ---- */
 .chunk-view { display: flex; gap: 12px; align-items: flex-start; }
-.parts-wrap { position: relative; flex: 1 1 0; min-width: 0; }
+.parts-wrap { position: relative; flex: 1 1 0; min-width: 0; transition: flex .3s ease; }
 .parts { display: flex; flex-direction: column; gap: 2px; }
 .parts .part {
   --pc: var(--s-header); height: calc(var(--h) * 1px); display: flex; align-items: center; padding: 0 18px;
