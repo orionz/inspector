@@ -333,3 +333,30 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
   .file-summary .pill { display: none; }
 }
 .breakdown { margin-bottom: 8px; max-width: 720px; }
+
+/* ---- chunk parts ---- */
+.chunk-view { display: flex; gap: 12px; align-items: flex-start; }
+.parts-wrap { position: relative; flex: 1 1 0; min-width: 0; }
+.parts { display: flex; flex-direction: column; gap: 2px; }
+.parts .part {
+  --pc: var(--s-header); height: calc(var(--h) * 1px); display: flex; align-items: center; padding: 0 18px;
+  border: 0; border-left: 4px solid var(--pc); border-radius: 6px; cursor: pointer; text-align: left;
+  background: color-mix(in srgb, var(--pc) 18%, var(--panel)); font-size: 15px;
+}
+.parts .part:hover { background: color-mix(in srgb, var(--pc) 30%, var(--panel)); }
+.parts .part.s-changecols { --pc: var(--s-changecols); } .parts .part.s-opcols { --pc: var(--s-opcols); }
+.part-label b { font-weight: 700; }
+.part-name { display: none; }
+.part-detail { display: none; flex: 1 1 0; min-width: 0; }
+.chunk-view.open .part-detail { display: block; }
+.chunk-view.open .parts-wrap { flex: 0 0 40px; position: sticky; top: 56px; height: calc(100vh - 70px); }
+.chunk-view.open .dep-warning { display: none; }
+.chunk-view.open .parts { height: 100%; gap: 1px; }
+.chunk-view.open .parts .part {
+  height: auto; flex: var(--h) 1 0; padding: 0; justify-content: center; border-left-width: 0; border-radius: 3px;
+  background: var(--pc); opacity: .5;
+}
+.chunk-view.open .parts .part.sel { opacity: 1; outline: 2px solid var(--text); outline-offset: -2px; }
+.chunk-view.open .part-label { display: none; }
+.chunk-view.open .part-name { display: block; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 600; color: #000; overflow: hidden; }
+.part-detail > .card + .card, .part-detail > .card + .runs { margin-top: 12px; }

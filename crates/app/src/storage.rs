@@ -11,7 +11,7 @@ use leptos::context::Provider;
 use leptos::prelude::*;
 
 use crate::fmt;
-use crate::state::{AppState, Cache, ColumnRef, GroupView, Loaded};
+use crate::state::{AppState, Cache, ColumnRef, GroupView, Loaded, Part};
 
 fn with_chunk<R>(app: AppState, f: impl FnOnce(&Rc<Loaded>, &Chunk) -> R) -> Option<R> {
     let idx = app.chunk.get()?;
@@ -43,8 +43,8 @@ pub fn StorageTab() -> impl IntoView {
 #[component]
 pub fn SaveTab() -> impl IntoView {
     let app = expect_context::<AppState>();
-    let (chunk, column, group_view) = app.saved_sel;
-    let saved = AppState { file: app.saved, chunk, column, group_view, ..app };
+    let (chunk, part, column, group_view) = app.saved_sel;
+    let saved = AppState { file: app.saved, chunk, part, column, group_view, ..app };
     let note = move || {
         let original = app.file.with(|f| f.as_ref().map(|f| f.bytes.len()))?;
         let saved = app.saved.with(|f| f.as_ref().map(|f| f.bytes.len()));
@@ -159,6 +159,7 @@ fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
 
 fn select_chunk(app: AppState, index: usize) {
     app.chunk.set(Some(index));
+    app.part.set(None);
     app.column.set(None);
     window().scroll_to_with_x_and_y(0.0, 0.0);
 }
@@ -413,7 +414,7 @@ fn ChunkStack() -> impl IntoView {
             </div>
             <Show when=move || app.chunk.get().is_some()>
                 <button class="stack-close" title="Back to all chunks"
-                    on:click=move |_| { app.chunk.set(None); app.column.set(None); }>
+                    on:click=move |_| { app.chunk.set(None); app.part.set(None); app.column.set(None); }>
                     <span class="stack-title" node_ref=title_el class:placed=move || title_y.get().is_some()
                         style:top=move || title_y.get().map(|y| format!("{y}px"))>{move || with_chunk(app, |_, c| format!("{} #{}", c.kind.label(), c.index))}</span>
                     <span class="stack-back">"‹"</span>
@@ -423,18 +424,105 @@ fn ChunkStack() -> impl IntoView {
     }
 }
 
+fn parts(c: &Chunk) -> Vec<Part> {
+    let mut parts = vec![Part::Header];
+    if c.group(false).is_some() {
+        parts.push(Part::Changes);
+    }
+    if c.group(true).is_some() {
+        parts.push(Part::Ops);
+    }
+    parts
+}
+
+fn part_key(p: Part) -> &'static str {
+    match p {
+        Part::Header => "header",
+        Part::Changes => "changecols",
+        Part::Ops => "opcols",
+    }
+}
+
+fn part_name(p: Part) -> &'static str {
+    match p {
+        Part::Header => "Header",
+        Part::Changes => "Changes",
+        Part::Ops => "Ops",
+    }
+}
+
+fn part_bytes(c: &Chunk, p: Part) -> usize {
+    let group = |ops: bool| c.group(ops).map_or(0, |g| g.stored_len());
+    match p {
+        Part::Header => c.len() - group(false) - group(true),
+        Part::Changes => group(false),
+        Part::Ops => group(true),
+    }
+}
+
+fn part_label(c: &Chunk, p: Part) -> AnyView {
+    let rows = |ops: bool| c.group(ops).map_or(0, |g| g.rows);
+    match p {
+        Part::Header => {
+            let n = c.facts.actors.len();
+            view! { "Header: " <b>{fmt::count_exact(n)}</b> {if n == 1 { " actor" } else { " actors" }} }.into_any()
+        }
+        Part::Changes => view! { "Changes (" <b>{fmt::count_exact(rows(false))}</b> "): " {fmt::bytes(part_bytes(c, p))} }.into_any(),
+        Part::Ops => view! { "Ops (" <b>{fmt::count_exact(rows(true))}</b> "): " {fmt::bytes(part_bytes(c, p))} }.into_any(),
+    }
+}
+
+const PART_MIN_H: f64 = 56.0;
+const PART_SPAN_H: f64 = 420.0;
+
+/// The open chunk's parts as blocks; opening one shrinks them into a band
+/// at the left, like the chunk stack.
 #[component]
 fn ChunkDetail() -> impl IntoView {
     let app = expect_context::<AppState>();
+    let blocks = move || {
+        with_chunk(app, |_, c| {
+            let total = c.len().max(1) as f64;
+            parts(c)
+                .into_iter()
+                .map(|p| {
+                    let h = (PART_SPAN_H * part_bytes(c, p) as f64 / total).max(PART_MIN_H);
+                    view! {
+                        <button class=format!("part s-{}", part_key(p)) class:sel=move || app.part.get() == Some(p)
+                            style:--h=h.to_string()
+                            on:click=move |_| { app.part.set(Some(p)); app.column.set(None); }>
+                            <span class="part-label">{part_label(c, p)}</span>
+                            <span class="part-name">{part_name(p)}</span>
+                        </button>
+                    }
+                })
+                .collect_view()
+        })
+    };
+    let detail = move || {
+        let part = app.part.get()?;
+        Some(match part {
+            Part::Header => with_chunk(app, |f, c| view! { <ChunkFacts chunk=c.clone() file_len=f.report.len/> }.into_any())?,
+            Part::Changes => view! { <GroupPanel ops=false/><RunPanel/> }.into_any(),
+            Part::Ops => view! { <GroupPanel ops=true/><RunPanel/> }.into_any(),
+        })
+    };
     view! {
-        {move || with_chunk(app, |f, c| view! {
-            <ChunkFacts chunk=c.clone() file_len=f.report.len/>
-        })}
-        <div class="groups">
-            <GroupPanel ops=false/>
-            <GroupPanel ops=true/>
+        <div class="chunk-view" class:open=move || app.part.get().is_some()>
+            <div class="parts-wrap">
+                {move || with_chunk(app, |_, c| dep_warning(c).map(|w| view! {
+                    <div class=format!("dep-warning k-{}", color_key(c))>{format!("This change {w}.")}</div>
+                })).flatten()}
+                <div class="parts">{blocks}</div>
+                <Show when=move || app.part.get().is_some()>
+                    <button class="stack-close" title="Back to the chunk's parts"
+                        on:click=move |_| { app.part.set(None); app.column.set(None); }>
+                        <span class="stack-back">"‹"</span>
+                    </button>
+                </Show>
+            </div>
+            <section class="part-detail">{detail}</section>
         </div>
-        <RunPanel/>
     }
 }
 

@@ -25,6 +25,14 @@ pub enum GroupView {
     Changes,
 }
 
+/// A part of the selected chunk that can be opened on its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    Header,
+    Changes,
+    Ops,
+}
+
 /// Which column group of the selected chunk: change metadata or ops.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ColumnRef {
@@ -42,12 +50,18 @@ pub struct AppState {
     /// How long automerge takes to load the file and the saved file, in ms.
     pub load_ms: (RwSignal<Option<f64>>, RwSignal<Option<f64>>),
     /// The Save tab's chunk selection, kept apart from the Load tab's.
-    pub saved_sel: (RwSignal<Option<usize>>, RwSignal<Option<ColumnRef>>, RwSignal<(GroupView, GroupView)>),
+    pub saved_sel: (
+        RwSignal<Option<usize>>,
+        RwSignal<Option<Part>>,
+        RwSignal<Option<ColumnRef>>,
+        RwSignal<(GroupView, GroupView)>,
+    ),
     pub model: Local<Option<Rc<Result<DocModel, String>>>>,
     pub status: RwSignal<Option<String>>,
     pub tab: RwSignal<Tab>,
     /// The chunk whose detail panels are open; `None` shows the chunk stack.
     pub chunk: RwSignal<Option<usize>>,
+    pub part: RwSignal<Option<Part>>,
     pub column: RwSignal<Option<ColumnRef>>,
     pub group_view: RwSignal<(GroupView, GroupView)>,
     pub step: RwSignal<usize>,
@@ -63,12 +77,14 @@ impl AppState {
             saved_sel: (
                 RwSignal::new(None),
                 RwSignal::new(None),
+                RwSignal::new(None),
                 RwSignal::new((GroupView::Columns, GroupView::Columns)),
             ),
             model: RwSignal::new_local(None),
             status: RwSignal::new(None),
             tab: RwSignal::new(Tab::Load),
             chunk: RwSignal::new(None),
+            part: RwSignal::new(None),
             column: RwSignal::new(None),
             group_view: RwSignal::new((GroupView::Columns, GroupView::Columns)),
             step: RwSignal::new(0),
@@ -89,8 +105,10 @@ impl AppState {
     pub fn close(self) {
         self.chunk.set(None);
         self.column.set(None);
+        self.part.set(None);
         self.saved_sel.0.set(None);
         self.saved_sel.1.set(None);
+        self.saved_sel.2.set(None);
         self.tab.set(Tab::Load);
         self.status.set(None);
         self.model.set(None);
@@ -110,8 +128,10 @@ impl AppState {
                 let report = parse_file(&bytes);
                 self.column.set(None);
                 self.chunk.set(None);
+                self.part.set(None);
                 self.saved_sel.0.set(None);
                 self.saved_sel.1.set(None);
+                self.saved_sel.2.set(None);
                 self.group_view
                     .set((GroupView::Columns, GroupView::Columns));
                 self.model.set(None);
