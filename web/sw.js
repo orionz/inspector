@@ -29,10 +29,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  // the page itself is network-first so a new deploy is picked up promptly
+  // the page itself is network-first, revalidating past the HTTP cache (Pages
+  // serves it with max-age=600), so a new deploy shows on the next reload
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
