@@ -338,6 +338,11 @@ pre.hex { white-space: pre-wrap; word-break: break-all; background: var(--panel-
 .scrubber input { flex: 1; margin: 0; accent-color: var(--accent); }
 .scrubber span { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 34ch; text-align: right; }
 tr.future td { text-decoration: line-through; opacity: .45; }
+.diff-add { background: color-mix(in srgb, #2fb38a 28%, transparent); text-decoration: none; border-radius: 3px; }
+.diff-del { background: color-mix(in srgb, #e5484d 22%, transparent); color: #c4282d; text-decoration: line-through; border-radius: 3px; }
+.diff-del .val, .diff-del .obj-chip { color: inherit; text-decoration: inherit; }
+tr.diff-add td { background: color-mix(in srgb, #2fb38a 22%, transparent); opacity: 1; }
+tr.diff-del td { background: color-mix(in srgb, #e5484d 18%, transparent); color: #c4282d; opacity: 1; }
 .busy-wrap { position: relative; }
 .busy-wrap.busy > * { opacity: .55; transition: opacity .15s .15s; }
 .busy-wrap.busy::after {

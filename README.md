@@ -56,7 +56,10 @@ The three views sit on folder tabs above the file area.
 
 **Document tab**
 - A timeline bar across the top: drag it to see the document as it was after
-  any number of changes.
+  any number of changes. While dragging, what appeared since the drag began
+  is green and what went away is red and struck through (map keys, list
+  elements, changed values, the changed stretch of text or JSON, and ops);
+  letting go shows the plain version.
 - The document one object at a time, starting at `/` (the root): a map lists its keys
   and values, a list wraps its values as `[ v1, v2, … ]`, and text shows its
   string and marks. Nested objects appear as chips (`{map 12}`,

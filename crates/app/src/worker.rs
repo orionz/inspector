@@ -44,6 +44,8 @@ pub enum Value {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct Entry {
     pub key: String,
+    /// The op that set the value, which tells list elements apart across versions.
+    pub id: String,
     pub value: Value,
     pub conflict: bool,
     /// Which change set the value, for a tooltip.
@@ -193,6 +195,7 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
                 .into_iter()
                 .map(|e| Entry {
                     origin: origin_label(m, e.origin, &e.op_id),
+                    id: e.op_id.clone(),
                     value: match e.value {
                         NodeValue::Scalar { text, kind } => Value::Scalar { text, kind: kind.into() },
                         NodeValue::Object { id, ty, len } => Value::Object { id: id.to_string(), kind: ty.into(), len },

@@ -85,6 +85,23 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
             })
         })
     };
+    let (base_data, _) = {
+        let obj = obj.clone();
+        use_query(format!("base:{level}"), move || {
+            let from = app.drag_from.get()?;
+            if band() {
+                return None;
+            }
+            let obj = obj.clone();
+            match app.doc_mode.get() {
+                DocMode::Ops => None,
+                DocMode::Json => Some(Req::Json { obj, step: from, limit: JSON_LIMIT }),
+                DocMode::Value if kind == ObjKind::Text => Some(Req::Text { obj, step: from, limit_chars: text_chars.get() }),
+                DocMode::Value => Some(Req::Page { obj, step: from, limit: limit.get() }),
+            }
+        })
+    };
+    let diffing = move || app.drag_from.get().is_some_and(|f| f != app.step.get());
     let band_view = {
         let title = title.clone();
         move || {
@@ -127,6 +144,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
         let head = |extra: String| view! {
             <div class="card-title">{pane_title(&title, &obj)}<span class="dim">{extra}</span></div>
         };
+        let base = if diffing() { base_data.get() } else { None };
         let body = pane_data.with(|d| match d {
             None => view! { <div class="card doc-pane">{head(String::new())}</div> }.into_any(),
             Some(Resp::Text { text, chars, marks }) => {
@@ -134,7 +152,13 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 view! {
                     <div class="card doc-pane text-pane">
                         {head(obj_label(ObjKind::Text, chars))}
-                        <pre class="text">{text.clone()}{(chars > text.chars().count()).then(|| "…")}</pre>
+                        <pre class="text">
+                            {match &base {
+                                Some(Resp::Text { text: old, .. }) => diff_text(old, text).into_any(),
+                                _ => text.clone().into_any(),
+                            }}
+                            {(chars > text.chars().count()).then(|| "…")}
+                        </pre>
                         {(chars > text_chars.get_untracked()).then(|| view! {
                             <button class="link" on:click=move |_| text_chars.update(|l| *l *= 4)>{format!("show more of {} chars", fmt::count(chars))}</button>
                         })}
@@ -152,10 +176,15 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 let total = *total;
                 let list = kind == ObjKind::List;
                 let shown = entries.len();
+                let marked = match &base {
+                    Some(Resp::Page { entries: old, .. }) if list => diff_list(old, entries),
+                    Some(Resp::Page { entries: old, .. }) => diff_map(old, entries),
+                    _ => entries.iter().map(|e| (Mark::Same, e.clone())).collect(),
+                };
                 let items = if list {
-                    let items = entries.iter().enumerate().map(|(i, e)| view! {
+                    let items = marked.into_iter().enumerate().map(|(i, (mark, e))| view! {
                         {(i > 0).then(|| view! { <span class="sep">", "</span> })}
-                        <DocValue entry=e.clone() level=level in_list=true/>
+                        <span class=mark.class()><DocValue entry=e level=level in_list=true/></span>
                     }).collect_view();
                     view! {
                         <div class="doc-list mono">
@@ -164,9 +193,9 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                     }
                     .into_any()
                 } else {
-                    let rows = entries.iter().map(|e| view! {
-                        <div class="doc-key">{e.key.clone()}</div>
-                        <div class="doc-val"><DocValue entry=e.clone() level=level in_list=false/></div>
+                    let rows = marked.into_iter().map(|(mark, e)| view! {
+                        <div class=format!("doc-key {}", mark.class())>{e.key.clone()}</div>
+                        <div class=format!("doc-val {}", mark.class())><DocValue entry=e level=level in_list=false/></div>
                     }).collect_view();
                     view! { <div class="doc-map mono">{rows}</div> }.into_any()
                 };
@@ -187,7 +216,13 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
             Some(Resp::Json { json, cut }) => view! {
                 <div class="card doc-pane text-pane">
                     {head("JSON".into())}
-                    <pre class="json">{json.clone()}{cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}</pre>
+                    <pre class="json">
+                        {match &base {
+                            Some(Resp::Json { json: old, .. }) => diff_text(old, json).into_any(),
+                            _ => json.clone().into_any(),
+                        }}
+                        {cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}
+                    </pre>
                 </div>
             }
             .into_any(),
@@ -197,7 +232,10 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                 let rows = ops.iter().map(|op| {
                     let change = op.change;
                     view! {
-                        <tr title=op.origin.clone() class:future=move || change.is_some_and(|c| c >= app.step.get())>
+                        <tr title=op.origin.clone()
+                            class:future=move || change.is_some_and(|c| c >= app.step.get())
+                            class:diff-add=move || drag_moved(app, change) == Some(true)
+                            class:diff-del=move || drag_moved(app, change) == Some(false)>
                             <td>{op.id.clone()}</td>
                             <td>{op.key.clone()}</td>
                             <td>{op.action.clone()}</td>
@@ -214,7 +252,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                                 <span class="pager">
                                     <button disabled=move || ops_page.get() == 0 on:click=move |_| ops_page.update(|p| *p -= 1)>"‹"</button>
                                     <span>{move || format!("page {} / {pages}", ops_page.get() + 1)}</span>
-                                    <button disabled=move || ops_page.get() + 1 >= pages on:click=move |_| ops_page.update(|p| *p += 1)>"›"</button>
+                                    <button disabled=move || { ops_page.get() + 1 >= pages } on:click=move |_| ops_page.update(|p| *p += 1)>"›"</button>
                                 </span>
                             })}
                         </div>
@@ -234,6 +272,135 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
         <div class="doc-level" class:band=band>
             {move || if band() { band_view.clone()().into_any() } else { pane_view.clone()().into_any() }}
         </div>
+    }
+}
+
+/// How a value differs from the version the history bar's drag started at.
+#[derive(Clone, Copy, PartialEq)]
+enum Mark {
+    Same,
+    Added,
+    Removed,
+}
+
+impl Mark {
+    fn class(self) -> &'static str {
+        match self {
+            Mark::Same => "",
+            Mark::Added => "diff-add",
+            Mark::Removed => "diff-del",
+        }
+    }
+}
+
+fn unchanged(a: &Entry, b: &Entry) -> bool {
+    a.id == b.id && (matches!(a.value, Value::Object { .. }) || a.value == b.value)
+}
+
+/// Map entries of both versions in key order, marking what came and went.
+fn diff_map(old: &[Entry], new: &[Entry]) -> Vec<(Mark, Entry)> {
+    let (mut i, mut j) = (0, 0);
+    let mut out = Vec::with_capacity(new.len());
+    loop {
+        match (old.get(i), new.get(j)) {
+            (Some(a), Some(b)) if a.key == b.key => {
+                if unchanged(a, b) {
+                    out.push((Mark::Same, b.clone()));
+                } else {
+                    out.push((Mark::Removed, a.clone()));
+                    out.push((Mark::Added, b.clone()));
+                }
+                i += 1;
+                j += 1;
+            }
+            (Some(a), Some(b)) if a.key < b.key => {
+                out.push((Mark::Removed, a.clone()));
+                i += 1;
+            }
+            (_, Some(b)) => {
+                out.push((Mark::Added, b.clone()));
+                j += 1;
+            }
+            (Some(a), None) => {
+                out.push((Mark::Removed, a.clone()));
+                i += 1;
+            }
+            (None, None) => return out,
+        }
+    }
+}
+
+/// List elements of both versions in order, matched by the op that set them.
+fn diff_list(old: &[Entry], new: &[Entry]) -> Vec<(Mark, Entry)> {
+    let old_ids: std::collections::HashSet<&str> = old.iter().map(|e| e.id.as_str()).collect();
+    let new_ids: std::collections::HashSet<&str> = new.iter().map(|e| e.id.as_str()).collect();
+    let (mut i, mut j) = (0, 0);
+    let mut out = Vec::with_capacity(new.len());
+    loop {
+        match (old.get(i), new.get(j)) {
+            (Some(a), Some(b)) if a.id == b.id => {
+                if unchanged(a, b) {
+                    out.push((Mark::Same, b.clone()));
+                } else {
+                    out.push((Mark::Removed, a.clone()));
+                    out.push((Mark::Added, b.clone()));
+                }
+                i += 1;
+                j += 1;
+            }
+            (Some(a), _) if !new_ids.contains(a.id.as_str()) => {
+                out.push((Mark::Removed, a.clone()));
+                i += 1;
+            }
+            (_, Some(b)) if !old_ids.contains(b.id.as_str()) => {
+                out.push((Mark::Added, b.clone()));
+                j += 1;
+            }
+            (Some(_), Some(b)) => {
+                out.push((Mark::Same, b.clone()));
+                i += 1;
+                j += 1;
+            }
+            (Some(a), None) => {
+                out.push((Mark::Removed, a.clone()));
+                i += 1;
+            }
+            (None, Some(b)) => {
+                out.push((Mark::Added, b.clone()));
+                j += 1;
+            }
+            (None, None) => return out,
+        }
+    }
+}
+
+/// `new` with the stretch that differs from `old` shown as removed and added text.
+fn diff_text(old: &str, new: &str) -> impl IntoView {
+    let mut pre = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
+    while !old.is_char_boundary(pre) || !new.is_char_boundary(pre) {
+        pre -= 1;
+    }
+    let room = old.len().min(new.len()) - pre;
+    let mut suf = old.bytes().rev().zip(new.bytes().rev()).take(room).take_while(|(a, b)| a == b).count();
+    while !old.is_char_boundary(old.len() - suf) || !new.is_char_boundary(new.len() - suf) {
+        suf -= 1;
+    }
+    view! {
+        {new[..pre].to_string()}
+        <del class="diff-del">{old[pre..old.len() - suf].to_string()}</del>
+        <ins class="diff-add">{new[pre..new.len() - suf].to_string()}</ins>
+        {new[new.len() - suf..].to_string()}
+    }
+}
+
+/// While the history bar is dragged: `Some(true)` for an op made since the
+/// drag started, `Some(false)` for one undone by dragging back.
+fn drag_moved(app: AppState, change: Option<usize>) -> Option<bool> {
+    let (c, from, now) = (change?, app.drag_from.get()?, app.step.get());
+    match (c < from, c < now) {
+        (false, true) => Some(true),
+        (true, false) => Some(false),
+        _ => None,
     }
 }
 
@@ -267,6 +434,9 @@ fn Scrubber(changes: usize) -> impl IntoView {
     view! {
         <div class="scrubber">
             <input type="range" min="0" max=n.to_string() prop:value=move || app.step.get().to_string()
+                on:pointerdown=move |_| app.drag_from.set(Some(app.step.get_untracked()))
+                on:pointerup=move |_| app.drag_from.set(None)
+                on:change=move |_| app.drag_from.set(None)
                 on:input=move |ev| app.step.set(event_target_value(&ev).parse().unwrap_or(n))/>
             <span>{label}</span>
         </div>

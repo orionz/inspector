@@ -91,6 +91,8 @@ pub struct AppState {
     pub group_view: RwSignal<(GroupView, GroupView)>,
     /// How many changes of history the document view shows.
     pub step: RwSignal<usize>,
+    /// While the history bar is being dragged, the step the drag started at.
+    pub drag_from: RwSignal<Option<usize>>,
     /// Objects opened in the document view, from just below the root.
     pub doc_path: RwSignal<Vec<Crumb>>,
     pub doc_mode: RwSignal<DocMode>,
@@ -116,6 +118,7 @@ impl AppState {
             column: RwSignal::new(None),
             group_view: RwSignal::new((GroupView::Physical, GroupView::Physical)),
             step: RwSignal::new(0),
+            drag_from: RwSignal::new(None),
             doc_path: RwSignal::new(Vec::new()),
             doc_mode: RwSignal::new(DocMode::Value),
         };
