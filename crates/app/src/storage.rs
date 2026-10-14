@@ -78,10 +78,6 @@ const ABSORB_FACTOR: usize = 3;
 const BLOCK_MIN_H: f64 = 26.0;
 /// Vertical space per tiny chunk, so the cursor steps through them one by one.
 const BAND_PITCH: f64 = 3.0;
-/// Tightest spacing at which bands are still drawn one per chunk.
-const MIN_STRIPE_PITCH: f64 = 2.0;
-/// Past this height a band group squeezes its bands below one pitch.
-const MAX_BANDS_H: f64 = 1500.0;
 /// Size spreads above this ratio switch block heights to a log scale.
 const LINEAR_SPREAD: usize = 8;
 
@@ -96,7 +92,7 @@ impl StackItem {
             StackItem::Block { height, .. } => *height,
             StackItem::Bands { first, last } => {
                 let n = last - first + 1;
-                band_pitch(n) * n as f64
+                BAND_PITCH * n as f64
             }
         }
     }
@@ -151,11 +147,9 @@ fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
     StackLayout { items }
 }
 
-/// A band's background: one stripe per chunk in its kind's colour, drawn as
-/// a single gradient because thousands of 1px elements don't reliably paint.
-/// Stripes get a gap between them while each is at least `MIN_STRIPE_PITCH`
-/// tall at `height`.
-fn band_background(chunks: &[Chunk], height: f64) -> String {
+/// A band's colours: one stripe per chunk in its kind's colour, drawn as a
+/// single gradient because thousands of thin elements don't reliably paint.
+fn band_background(chunks: &[Chunk]) -> String {
     let n = chunks.len().max(1);
     let pct = |i: usize| i as f64 * 100.0 / n as f64;
     let mut stops = vec![];
@@ -163,17 +157,11 @@ fn band_background(chunks: &[Chunk], height: f64) -> String {
     for i in 1..=chunks.len() {
         if i == chunks.len() || color_key(&chunks[i]) != color_key(&chunks[start]) {
             let k = color_key(&chunks[start]);
-            stops.push(format!("var(--k-{k}) {:.4}% {:.4}%", pct(start), pct(i)));
+            stops.push(format!("var(--k-{k}) {:.5}% {:.5}%", pct(start), pct(i)));
             start = i;
         }
     }
-    let colors = format!("linear-gradient({})", stops.join(", "));
-    if height / n as f64 >= MIN_STRIPE_PITCH {
-        let p = 100.0 / n as f64;
-        format!("repeating-linear-gradient(transparent 0 calc({p:.4}% - 1px), var(--panel) calc({p:.4}% - 1px) {p:.4}%), {colors}")
-    } else {
-        colors
-    }
+    format!("linear-gradient({})", stops.join(", "))
 }
 
 fn select_chunk(app: AppState, index: usize) {
@@ -217,10 +205,6 @@ const DECK_GROW: f64 = 1.1;
 /// How many neighbouring panels are kept either side of the hovered chunk.
 const DECK_REACH: usize = 2;
 
-fn band_pitch(n: usize) -> f64 {
-    BAND_PITCH.min(MAX_BANDS_H / n as f64)
-}
-
 /// Where a chunk sits in the stack, for finding the chunk under the cursor.
 struct HitRow {
     top: f64,
@@ -236,7 +220,7 @@ fn hit_rows(layout: &StackLayout) -> Vec<HitRow> {
         match *item {
             StackItem::Block { .. } => rows.push(HitRow { top: y, bottom: y + h, band: false }),
             StackItem::Bands { first, last } => {
-                let pitch = band_pitch(last - first + 1);
+                let pitch = BAND_PITCH;
                 for i in 0..=last - first {
                     let top = y + i as f64 * pitch;
                     rows.push(HitRow { top, bottom: top + pitch, band: true });
@@ -348,8 +332,7 @@ fn ChunkStack() -> impl IntoView {
                     .items
                     .into_iter()
                     .map(|item| {
-                        let height = item.height();
-                        let h = height.to_string();
+                        let h = item.height().to_string();
                         match item {
                             StackItem::Block { index, .. } => view! {
                                 <div class=format!("blk k-{}", color_key(&f.report.chunks[index]))
@@ -361,7 +344,7 @@ fn ChunkStack() -> impl IntoView {
                                 <div class="bands"
                                     class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
                                     style:--h=h>
-                                    <div class="band-fill" style:background=band_background(&f.report.chunks[first..=last], height)></div>
+                                    <div class="band-fill" style:background=band_background(&f.report.chunks[first..=last])></div>
                                 </div>
                             }
                             .into_any(),

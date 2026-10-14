@@ -201,7 +201,8 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .blk:hover { background: color-mix(in srgb, var(--kc) 28%, var(--panel)); }
 
 .bands { flex: none; height: calc(var(--h) * 1px); }
-.band-fill { height: 100%; opacity: .55; }
+.band-fill { height: 100%; opacity: .55; -webkit-mask: repeating-linear-gradient(#000 0 2px, transparent 2px 3px); mask: repeating-linear-gradient(#000 0 2px, transparent 2px 3px); }
+.storage.open .band-fill { -webkit-mask: none; mask: none; }
 .bands.sel .band-fill { opacity: .9; }
 
 /* The hover deck: the chunk under the cursor zoomed out past the column,
