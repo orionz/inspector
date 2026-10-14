@@ -147,6 +147,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .r-repeat { background: var(--r-repeat); } .r-literal { background: var(--r-literal); } .r-null { background: var(--r-null); } .r-bool { background: var(--r-bool); } .r-raw { background: var(--r-raw); }
 
 /* ---- storage tab ---- */
+.save-note { max-width: 960px; margin: 0 auto 10px; font-size: 12.5px; }
 .storage { display: flex; gap: 12px; align-items: flex-start; }
 .stack-wrap { position: relative; flex: 1 1 0; min-width: 0; max-width: 960px; margin: 0 auto; transition: flex .3s ease; }
 .stack-head { display: flex; gap: 16px; align-items: flex-end; margin-bottom: 12px; }

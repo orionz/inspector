@@ -120,10 +120,13 @@ fn Header() -> impl IntoView {
             <div class="file-summary">{summary}</div>
             <Show when=move || app.file.with(|f| f.is_some())>
                 <nav class="tabs">
-                    <button class:active=move || app.tab.get() == Tab::Storage
-                        on:click=move |_| app.tab.set(Tab::Storage)>"Storage"</button>
-                    <button class:active=move || app.tab.get() == Tab::Document
-                        on:click=move |_| app.tab.set(Tab::Document)>"Document"</button>
+                    {[(Tab::Load, "Load", "The file as loaded"),
+                      (Tab::Document, "Document", "The document's contents and history"),
+                      (Tab::Save, "Save", "What doc.save() writes for this document")]
+                        .map(|(tab, label, title)| view! {
+                            <button class:active=move || app.tab.get() == tab title=title
+                                on:click=move |_| app.tab.set(tab)>{label}</button>
+                        })}
                 </nav>
             </Show>
             <label class="btn primary">
@@ -192,10 +195,12 @@ fn App() -> impl IntoView {
                 {move || {
                     if app.file.with(|f| f.is_none()) {
                         view! { <Welcome/> }.into_any()
-                    } else if app.tab.get() == Tab::Storage {
-                        view! { <storage::StorageTab/> }.into_any()
                     } else {
-                        view! { <document::DocumentTab/> }.into_any()
+                        match app.tab.get() {
+                            Tab::Load => view! { <storage::StorageTab/> }.into_any(),
+                            Tab::Document => view! { <document::DocumentTab/> }.into_any(),
+                            Tab::Save => view! { <storage::SaveTab/> }.into_any(),
+                        }
                     }
                 }}
             </main>

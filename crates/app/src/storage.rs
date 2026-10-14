@@ -7,6 +7,7 @@ use am_inspect::columns::{
 };
 use am_inspect::doc::{decode_change, short_hex};
 use am_inspect::{chunk_changes, format_time};
+use leptos::context::Provider;
 use leptos::prelude::*;
 
 use crate::fmt;
@@ -34,6 +35,36 @@ pub fn StorageTab() -> impl IntoView {
                 <ChunkDetail/>
             </section>
         </div>
+    }
+}
+
+/// The storage view of what `doc.save()` writes for the loaded document,
+/// with its own chunk selection.
+#[component]
+pub fn SaveTab() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let (chunk, column, group_view) = app.saved_sel;
+    let saved = AppState { file: app.saved, chunk, column, group_view, ..app };
+    let note = move || {
+        let original = app.file.with(|f| f.as_ref().map(|f| f.bytes.len()))?;
+        let saved = app.saved.with(|f| f.as_ref().map(|f| f.bytes.len()));
+        let failed = app.model.with(|m| m.as_deref().is_some_and(|m| m.is_err()));
+        Some(match saved {
+            Some(n) => format!(
+                "What doc.save() writes after loading this file: {} ({} of the original {}).",
+                fmt::bytes(n),
+                fmt::pct(n, original.max(1)),
+                fmt::bytes(original)
+            ),
+            None if failed => "The file didn't load as a document, so there's nothing to save.".into(),
+            None => "Loading the document…".into(),
+        })
+    };
+    view! {
+        <p class="dim save-note">{note}</p>
+        <Provider value=saved>
+            {move || app.saved.with(|f| f.is_some()).then(|| view! { <StorageTab/> })}
+        </Provider>
     }
 }
 

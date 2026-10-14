@@ -13,8 +13,9 @@ pub struct Loaded {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Storage,
+    Load,
     Document,
+    Save,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,6 +37,10 @@ type Local<T> = RwSignal<T, LocalStorage>;
 #[derive(Clone, Copy)]
 pub struct AppState {
     pub file: Local<Option<Rc<Loaded>>>,
+    /// What `doc.save()` writes for the loaded document.
+    pub saved: Local<Option<Rc<Loaded>>>,
+    /// The Save tab's chunk selection, kept apart from the Load tab's.
+    pub saved_sel: (RwSignal<Option<usize>>, RwSignal<Option<ColumnRef>>, RwSignal<(GroupView, GroupView)>),
     pub model: Local<Option<Rc<Result<DocModel, String>>>>,
     pub status: RwSignal<Option<String>>,
     pub tab: RwSignal<Tab>,
@@ -51,9 +56,15 @@ impl AppState {
     pub fn new() -> Self {
         let state = Self {
             file: RwSignal::new_local(None),
+            saved: RwSignal::new_local(None),
+            saved_sel: (
+                RwSignal::new(None),
+                RwSignal::new(None),
+                RwSignal::new((GroupView::Columns, GroupView::Columns)),
+            ),
             model: RwSignal::new_local(None),
             status: RwSignal::new(None),
-            tab: RwSignal::new(Tab::Storage),
+            tab: RwSignal::new(Tab::Load),
             chunk: RwSignal::new(None),
             column: RwSignal::new(None),
             group_view: RwSignal::new((GroupView::Columns, GroupView::Columns)),
@@ -75,9 +86,12 @@ impl AppState {
     pub fn close(self) {
         self.chunk.set(None);
         self.column.set(None);
-        self.tab.set(Tab::Storage);
+        self.saved_sel.0.set(None);
+        self.saved_sel.1.set(None);
+        self.tab.set(Tab::Load);
         self.status.set(None);
         self.model.set(None);
+        self.saved.set(None);
         self.file.set(None);
     }
 
@@ -91,9 +105,12 @@ impl AppState {
                 let report = parse_file(&bytes);
                 self.column.set(None);
                 self.chunk.set(None);
+                self.saved_sel.0.set(None);
+                self.saved_sel.1.set(None);
                 self.group_view
                     .set((GroupView::Columns, GroupView::Columns));
                 self.model.set(None);
+                self.saved.set(None);
                 self.file.set(Some(Rc::new(Loaded { name, bytes, report })));
                 self.status.set(Some("Loading document history…".into()));
                 set_timeout(
@@ -103,6 +120,12 @@ impl AppState {
                             .with_untracked(|f| f.as_ref().map(|f| DocModel::load(&f.bytes)));
                         if let Some(model) = model {
                             let n = model.as_ref().map(|m| m.changes.len()).unwrap_or(0);
+                            let saved = model.as_ref().ok().map(|m| {
+                                let bytes = m.doc.save();
+                                let report = parse_file(&bytes);
+                                Rc::new(Loaded { name: "doc.save()".into(), bytes, report })
+                            });
+                            self.saved.set(saved);
                             self.model.set(Some(Rc::new(model)));
                             self.step.set(n);
                         }

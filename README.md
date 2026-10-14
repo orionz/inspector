@@ -6,7 +6,7 @@ in its history. Everything runs locally in the browser.
 
 ## What it shows
 
-**Storage tab**
+**Load tab**
 - The file as a vertical stack of chunks, coloured by type (document, change,
   compressed change, change set, v0 bundle). Block height follows chunk size,
   on a log scale when sizes differ by more than 8×; runs of chunks around 1%
@@ -39,6 +39,11 @@ in its history. Everything runs locally in the browser.
 - The document at that point as a lazy, collapsible tree. Each value shows the
   author/actor and time of the op that set it; click it to jump there.
 - An actors table: author, changes, ops, active period.
+
+**Save tab**
+- The Load tab's view of what `doc.save()` writes after loading the file, with
+  its size against the original. Changes that couldn't be applied are written
+  after the document, so they show up here too.
 
 ## Layout
 
