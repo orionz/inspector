@@ -285,6 +285,7 @@ table.ops td { max-width: 30ch; }
 
 .runs { position: relative; }
 .runs-close { position: absolute; top: 10px; right: 12px; }
+.raw-col { padding: 26px 4px 4px; line-height: 1.6; }
 .run-tables { display: flex; gap: 16px; align-items: flex-start; }
 .run-table { flex: 1 1 0; min-width: 0; overflow-x: auto; }
 .run-table-top { display: flex; align-items: center; gap: 14px; margin: 0 0 6px; padding-right: 70px; }

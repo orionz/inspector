@@ -26,7 +26,7 @@ The three views sit on folder tabs above the file area.
   second band beside the chunk band. In any band, click another chunk, part
   or column to switch to it, or the open one to go back one level; clicking a
   band of small chunks goes back to the stack.
-- Changes and Ops get Physical / Logical tabs on the right edge:
+- Changes and Ops get Physical / Logical / Raw tabs on the right edge:
   - **Physical**: the columns side by side, coloured by type, hanging from
     their names with length proportional to stored bytes (hover for share of
     group/file and bytes per row)
@@ -36,7 +36,9 @@ The three views sit on folder tabs above the file area.
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
-- Columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
+  - **Raw**: the same columns, each on its own; opening one shows just its
+    bytes as stored in the file (still deflated if the column is)
+- In Physical, columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
   `key.ctr`, `value.meta` + `value.raw`, …) highlight and open together;
   `key.str` stands alone. Clicking one shrinks the columns into a third band
   (each sized by its bytes), hides the Physical / Logical tabs, and opens the

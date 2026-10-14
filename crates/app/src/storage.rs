@@ -572,6 +572,7 @@ fn ChunkDetail() -> impl IntoView {
                 <nav class="side-tabs">
                     {side_tab(GroupView::Physical, "Physical")}
                     {side_tab(GroupView::Logical, "Logical")}
+                    {side_tab(GroupView::Raw, "Raw")}
                 </nav>
             </Show>
         </div>
@@ -680,8 +681,14 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                 {move || match view_of() {
                     GroupView::Physical => view! {
                         <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
-                            <div class="cols-wrap"><ColumnStrip ops=ops/></div>
+                            <div class="cols-wrap"><ColumnStrip ops=ops grouped=true/></div>
                             <section class="col-detail"><RunPanel/></section>
+                        </div>
+                    }.into_any(),
+                    GroupView::Raw => view! {
+                        <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
+                            <div class="cols-wrap"><ColumnStrip ops=ops grouped=false/></div>
+                            <section class="col-detail"><RawColumn/></section>
                         </div>
                     }.into_any(),
                     GroupView::Logical => view! { <RowsView ops=ops/> }.into_any(),
@@ -694,8 +701,9 @@ fn GroupPanel(ops: bool) -> impl IntoView {
 const STRIP_H: f64 = 320.0;
 
 /// The group's columns side by side, each as tall as its stored bytes.
+/// When `grouped`, columns encoding one field highlight and open together.
 #[component]
-fn ColumnStrip(ops: bool) -> impl IntoView {
+fn ColumnStrip(ops: bool, grouped: bool) -> impl IntoView {
     let app = expect_context::<AppState>();
     move || {
         with_chunk(app, |f, c| {
@@ -707,7 +715,7 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
             let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
             for (i, col) in g.columns.iter().enumerate() {
                 match spans.last_mut() {
-                    Some(r) if same_field(&g.columns[r.start], col) => r.end = i + 1,
+                    Some(r) if grouped && same_field(&g.columns[r.start], col) => r.end = i + 1,
                     _ => spans.push(i..i + 1),
                 }
             }
@@ -980,6 +988,36 @@ fn run_lines(col: &ColumnInfo, run: &Run, actors: &[String], skip: usize, until:
         };
         let title = format!("literal · row {} · {}", run.first_row + i, encoded(&(start..end)));
         out.push(RunLine { kind: run.kind, rows: run.first_row + i..run.first_row + i + 1, value, title });
+    }
+}
+
+const RAW_SHOWN: usize = 64 * 1024;
+
+/// The selected column's bytes exactly as stored in the file.
+#[component]
+fn RawColumn() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    move || {
+        let sel = app.column.get()?;
+        let hex = with_chunk(app, |f, c| {
+            let col = c.group(sel.ops)?.columns.get(sel.index)?;
+            let bytes = col
+                .file_offset
+                .and_then(|o| f.bytes.get(o..o + col.stored_len))
+                .unwrap_or(&col.data);
+            let mut hex: String = bytes.iter().take(RAW_SHOWN).map(|x| format!("{x:02x} ")).collect();
+            if bytes.len() > RAW_SHOWN {
+                hex.push_str(&format!("… {} more bytes", bytes.len() - RAW_SHOWN));
+            }
+            Some(hex)
+        })
+        .flatten()?;
+        Some(view! {
+            <div class="card runs">
+                <button class="link runs-close" on:click=move |_| app.column.set(None)>"close ✕"</button>
+                <div class="hex raw-col">{hex}</div>
+            </div>
+        })
     }
 }
 

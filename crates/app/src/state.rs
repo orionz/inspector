@@ -22,6 +22,7 @@ pub enum Tab {
 pub enum GroupView {
     Physical,
     Logical,
+    Raw,
 }
 
 /// A part of the selected chunk that can be opened on its own.
