@@ -153,11 +153,20 @@ impl AppState {
     /// Parses the file in two phases so the storage view appears before the
     /// (much slower) full document load finishes.
     pub fn open(self, name: String, bytes: Vec<u8>) {
+        self.open_marked(name, bytes, HashSet::new());
+    }
+
+    /// Like [`open`](Self::open), flagging the chunks that start at
+    /// `redundant` byte offsets as only repeating changes held elsewhere.
+    pub fn open_marked(self, name: String, bytes: Vec<u8>, redundant: HashSet<usize>) {
         self.status
             .set(Some(format!("Parsing {name} ({})…", crate::fmt::bytes(bytes.len()))));
         set_timeout(
             move || {
-                let report = parse_structure(&bytes);
+                let mut report = parse_structure(&bytes);
+                for c in &mut report.chunks {
+                    c.redundant = redundant.contains(&c.range.start);
+                }
                 self.column.set(None);
                 self.chunk.set(None);
                 self.part.set(None);

@@ -150,6 +150,8 @@ pub struct Chunk {
     pub error: Option<String>,
     /// Change and compressed change chunks only.
     pub dep_order: DepOrder,
+    /// Set by whoever supplied the file: the chunk only repeats changes another chunk holds.
+    pub redundant: bool,
 }
 
 impl Chunk {
@@ -350,6 +352,7 @@ fn parse_chunk(file: &[u8], start: usize, index: usize) -> Result<Chunk> {
         inflated_len: None,
         error: None,
         dep_order: DepOrder::InOrder,
+        redundant: false,
     };
     let result = match kind {
         ChunkKind::Document => parse_document(&mut chunk, body, body_start),

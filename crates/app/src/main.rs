@@ -11,6 +11,7 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use state::{AppState, Loaded, Tab};
@@ -100,13 +101,21 @@ fn open_link(app: AppState, link: String) {
         match patchwork::fetch(&id).await {
             Ok(f) if f.chunks.is_empty() => app.status.set(Some(format!("The sync server has nothing stored for {name}"))),
             Ok(f) => {
-                let (kept, sent) = f.commits;
+                let mut bytes = vec![];
+                let mut redundant = HashSet::new();
+                for (chunk, repeat) in &f.chunks {
+                    if *repeat {
+                        redundant.insert(bytes.len());
+                    }
+                    bytes.extend_from_slice(chunk);
+                }
                 app.fetched.set(Some(format!(
-                    "{} fragments + {kept} loose commits ({} repeats left out)",
-                    f.fragments,
-                    fmt::count_exact(sent - kept)
+                    "{} fragments + {} loose commits ({} redundant)",
+                    fmt::count_exact(f.fragments),
+                    fmt::count_exact(f.commits),
+                    fmt::count_exact(redundant.len())
                 )));
-                app.open(name, f.chunks.concat());
+                app.open_marked(name, bytes, redundant);
             }
             Err(e) => app.status.set(Some(format!("Could not fetch {name}: {e}"))),
         }
@@ -138,7 +147,7 @@ fn Header() -> impl IntoView {
                     <span class="pill">{format!("{} chunks", r.chunks.len())}</span>
                     <span class="pill">{format!("{} changes", fmt::count(changes))}</span>
                     <span class="pill">{format!("{} ops", fmt::count(ops))}</span>
-                    {app.fetched.get().map(|f| view! { <span class="pill" title="What the sync server stores; loose commits whose change is already inside a fragment are left out">{f}</span> })}
+                    {app.fetched.get().map(|f| view! { <span class="pill" title="What the sync server sent; redundant chunks (magenta) only repeat changes a fragment or an earlier commit already holds">{f}</span> })}
                 }
             })
         })

@@ -151,27 +151,29 @@ fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
     StackLayout { items }
 }
 
-/// The colour key of each stripe in a band `height` px tall. Past one
-/// stripe per `MIN_STRIPE_PITCH`, each stripe stands for a run of chunks
-/// and takes the colour most of them share.
-fn band_stripes(chunks: &[Chunk], height: f64) -> Vec<&'static str> {
-    let cap = ((height / MIN_STRIPE_PITCH) as usize).max(1);
-    if chunks.len() <= cap {
-        return chunks.iter().map(color_key).collect();
+/// A band's background: one stripe per chunk in its kind's colour, drawn as
+/// a single gradient because thousands of 1px elements don't reliably paint.
+/// Stripes get a gap between them while each is at least `MIN_STRIPE_PITCH`
+/// tall at `height`.
+fn band_background(chunks: &[Chunk], height: f64) -> String {
+    let n = chunks.len().max(1);
+    let pct = |i: usize| i as f64 * 100.0 / n as f64;
+    let mut stops = vec![];
+    let mut start = 0;
+    for i in 1..=chunks.len() {
+        if i == chunks.len() || color_key(&chunks[i]) != color_key(&chunks[start]) {
+            let k = color_key(&chunks[start]);
+            stops.push(format!("var(--k-{k}) {:.4}% {:.4}%", pct(start), pct(i)));
+            start = i;
+        }
     }
-    (0..cap)
-        .map(|i| {
-            let run = &chunks[i * chunks.len() / cap..(i + 1) * chunks.len() / cap];
-            let mut counts: Vec<(&'static str, usize)> = vec![];
-            for k in run.iter().map(color_key) {
-                match counts.iter_mut().find(|(c, _)| *c == k) {
-                    Some((_, n)) => *n += 1,
-                    None => counts.push((k, 1)),
-                }
-            }
-            counts.into_iter().max_by_key(|(_, n)| *n).map_or("unknown", |(k, _)| k)
-        })
-        .collect()
+    let colors = format!("linear-gradient({})", stops.join(", "));
+    if height / n as f64 >= MIN_STRIPE_PITCH {
+        let p = 100.0 / n as f64;
+        format!("repeating-linear-gradient(transparent 0 calc({p:.4}% - 1px), var(--panel) calc({p:.4}% - 1px) {p:.4}%), {colors}")
+    } else {
+        colors
+    }
 }
 
 fn select_chunk(app: AppState, index: usize) {
@@ -258,6 +260,9 @@ struct ChunkCard {
 }
 
 fn color_key(c: &Chunk) -> &'static str {
+    if c.redundant {
+        return "redundant";
+    }
     match c.dep_order {
         DepOrder::InOrder => c.kind.key(),
         DepOrder::Late => "late",
@@ -266,6 +271,9 @@ fn color_key(c: &Chunk) -> &'static str {
 }
 
 fn dep_warning(c: &Chunk) -> Option<&'static str> {
+    if c.redundant {
+        return Some("is redundant: the server also sent a fragment or an earlier commit holding the same changes");
+    }
     match c.dep_order {
         DepOrder::InOrder => None,
         DepOrder::Late => Some("depends on a change later in the file"),
@@ -353,12 +361,7 @@ fn ChunkStack() -> impl IntoView {
                                 <div class="bands"
                                     class:sel=move || app.chunk.get().is_some_and(|c| (first..=last).contains(&c))
                                     style:--h=h>
-                                    <div class="band-stripes">
-                                        {band_stripes(&f.report.chunks[first..=last], height)
-                                            .into_iter()
-                                            .map(|k| view! { <i class=format!("k-{k}")></i> })
-                                            .collect_view()}
-                                    </div>
+                                    <div class="band-fill" style:background=band_background(&f.report.chunks[first..=last], height)></div>
                                 </div>
                             }
                             .into_any(),

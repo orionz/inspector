@@ -40,16 +40,15 @@ pub fn title(link: &str) -> Option<String> {
 
 /// What the server stores for a document, reduced to the pieces a reader needs.
 pub struct Fetched {
-    /// The fragments and then the kept loose commits, each in causal order
-    /// and each the automerge chunk it was stored as.
-    pub chunks: Vec<Vec<u8>>,
+    /// The fragments and then the loose commits, each in causal order and
+    /// each the automerge chunk it was stored as, flagged when it only
+    /// repeats changes a fragment or an earlier commit already holds.
+    pub chunks: Vec<(Vec<u8>, bool)>,
     pub fragments: usize,
-    /// Loose commits kept, of those sent; the rest only repeat changes inside fragments.
-    pub commits: (usize, usize),
+    pub commits: usize,
 }
 
-/// Downloads everything the server stores for the document, leaving out
-/// loose commits whose change a fragment already holds.
+/// Downloads everything the server stores for the document.
 pub async fn fetch(doc_id: &str) -> Result<Fetched, String> {
     let uuid = bs58::decode(doc_id)
         .with_check(None)
@@ -95,40 +94,52 @@ pub async fn fetch(doc_id: &str) -> Result<Fetched, String> {
         SyncResult::NotFound => return Err("the sync server doesn't have this document".into()),
         SyncResult::Unauthorized => return Err("the sync server refused access to this document".into()),
     };
-    let mut blobs: HashMap<CommitId, Vec<u8>> = HashMap::new();
+    let mut fragment_blobs: HashMap<CommitId, Vec<Vec<u8>>> = HashMap::new();
+    let mut commit_blobs: HashMap<CommitId, Vec<Vec<u8>>> = HashMap::new();
     let mut fragments = vec![];
     let mut commits = vec![];
     for (signed, blob) in diff.missing_fragments {
         let f: Fragment = signed.try_decode_trusted_payload().map_err(|e| format!("bad fragment: {e}"))?;
-        blobs.insert(f.head(), blob.into_contents());
+        fragment_blobs.entry(f.head()).or_default().push(blob.into_contents());
         fragments.push(f);
     }
     for (signed, blob) in diff.missing_commits {
         let c: LooseCommit = signed.try_decode_trusted_payload().map_err(|e| format!("bad commit: {e}"))?;
-        blobs.entry(c.head()).or_insert_with(|| blob.into_contents());
+        commit_blobs.entry(c.head()).or_default().push(blob.into_contents());
         commits.push(c);
     }
     let tree = Sedimentree::new(fragments, commits);
-    let kept_fragments: Vec<&Fragment> = tree.fragments().collect();
-    let kept_commits: Vec<&LooseCommit> = tree.loose_commits().collect();
+    let tree_fragments: Vec<&Fragment> = tree.fragments().collect();
+    let tree_commits: Vec<&LooseCommit> = tree.loose_commits().collect();
     let order = tree.topsorted_blob_order().map_err(|e| format!("{e:?}"))?;
     let mut fragment_chunks = vec![];
     let mut commit_chunks = vec![];
     for item in order {
         match item {
-            SedimentreeItem::Fragment(i) => fragment_chunks.extend(blobs.remove(&kept_fragments[i].head())),
-            SedimentreeItem::LooseCommit(i) => commit_chunks.extend(blobs.remove(&kept_commits[i].head())),
+            SedimentreeItem::Fragment(i) => fragment_chunks.extend(fragment_blobs.remove(&tree_fragments[i].head()).unwrap_or_default()),
+            SedimentreeItem::LooseCommit(i) => commit_chunks.extend(commit_blobs.remove(&tree_commits[i].head()).unwrap_or_default()),
         }
     }
     let mut in_fragments = automerge::Automerge::new();
     let _ = in_fragments.load_incremental(&fragment_chunks.concat());
-    let covered: HashSet<ChangeHash> = in_fragments.get_changes_meta(&[]).iter().map(|m| m.hash).collect();
-    let sent_commits = commit_chunks.len();
-    commit_chunks.retain(|c| Change::try_from(&c[..]).map_or(true, |c| !covered.contains(&c.hash())));
+    let mut seen: HashSet<ChangeHash> = in_fragments.get_changes_meta(&[]).iter().map(|m| m.hash).collect();
+    let mut seen_blobs: HashSet<&[u8]> = HashSet::new();
+    let commits: Vec<(&Vec<u8>, bool)> = commit_chunks
+        .iter()
+        .map(|c| {
+            let repeat = !seen_blobs.insert(c.as_slice())
+                || Change::try_from(&c[..]).is_ok_and(|c| !seen.insert(c.hash()));
+            (c, repeat)
+        })
+        .collect();
     Ok(Fetched {
         fragments: fragment_chunks.len(),
-        commits: (commit_chunks.len(), sent_commits),
-        chunks: fragment_chunks.into_iter().chain(commit_chunks).collect(),
+        commits: commits.len(),
+        chunks: fragment_chunks
+            .iter()
+            .map(|f| (f.clone(), false))
+            .chain(commits.iter().map(|&(c, r)| (c.clone(), r)))
+            .collect(),
     })
 }
 

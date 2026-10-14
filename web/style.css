@@ -18,6 +18,7 @@
   --k-changeset: #f27a9b;
   --k-unknown: #6b7280;
   --k-late: #ff9a3c;
+  --k-redundant: #e535d6;
   --k-missing: #ff3b4e;
 
   --s-header: #6b7489;
@@ -166,7 +167,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
 }
 .k-doc { background: var(--k-doc); } .k-change { background: var(--k-change); } .k-compressed { background: var(--k-compressed); }
 .k-bundle { background: var(--k-bundle); } .k-changeset { background: var(--k-changeset); } .k-unknown { background: var(--k-unknown); }
-.k-late { background: var(--k-late); } .k-missing { background: var(--k-missing); }
+.k-late { background: var(--k-late); } .k-redundant { background: var(--k-redundant); } .k-missing { background: var(--k-missing); }
 .s-header { background: var(--s-header); } .s-metadata { background: var(--s-metadata); } .s-colmeta { background: var(--s-colmeta); }
 .s-changecols { background: var(--s-changecols); } .s-opcols { background: var(--s-opcols); } .s-suffix { background: var(--s-suffix); } .s-deflated { background: var(--s-deflated); }
 .t-actor { background: var(--t-actor); } .t-uint { background: var(--t-uint); } .t-delta { background: var(--t-delta); } .t-bool { background: var(--t-bool); }
@@ -188,7 +189,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .blk.k-doc, .deck-panel.k-doc { --kc: var(--k-doc); } .blk.k-change, .deck-panel.k-change { --kc: var(--k-change); }
 .blk.k-compressed, .deck-panel.k-compressed { --kc: var(--k-compressed); } .blk.k-bundle, .deck-panel.k-bundle { --kc: var(--k-bundle); }
 .blk.k-changeset, .deck-panel.k-changeset { --kc: var(--k-changeset); }
-.blk.k-late, .deck-panel.k-late { --kc: var(--k-late); } .blk.k-missing, .deck-panel.k-missing { --kc: var(--k-missing); }
+.blk.k-late, .deck-panel.k-late { --kc: var(--k-late); } .blk.k-redundant, .deck-panel.k-redundant, .dep-warning.k-redundant { --kc: var(--k-redundant); } .blk.k-missing, .deck-panel.k-missing { --kc: var(--k-missing); }
 .dep-warning { --kc: var(--k-late); background: color-mix(in srgb, var(--kc) 16%, var(--panel)); border: 1px solid var(--kc); border-radius: 6px; padding: 6px 10px; margin: 6px 0; font-size: 12.5px; }
 .dep-warning.k-missing { --kc: var(--k-missing); }
 .blk {
@@ -200,9 +201,8 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .blk:hover { background: color-mix(in srgb, var(--kc) 28%, var(--panel)); }
 
 .bands { flex: none; height: calc(var(--h) * 1px); }
-.band-stripes { display: flex; flex-direction: column; gap: 1px; height: 100%; }
-.band-stripes i { flex: 1; min-height: 0; opacity: .55; }
-.bands.sel .band-stripes i { opacity: .9; }
+.band-fill { height: 100%; opacity: .55; }
+.bands.sel .band-fill { opacity: .9; }
 
 /* The hover deck: the chunk under the cursor zoomed out past the column,
    its neighbours half-height behind it. */
