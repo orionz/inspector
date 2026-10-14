@@ -118,18 +118,7 @@ fn Header() -> impl IntoView {
                 <span class="version" title=format!("build {APP_VERSION} · commit {APP_COMMIT}")>{APP_VERSION}</span>
             </div>
             <div class="file-summary">{summary}</div>
-            <Show when=move || app.file.with(|f| f.is_some())>
-                <nav class="tabs">
-                    {[(Tab::Load, "Load", "The file as loaded"),
-                      (Tab::Document, "Document", "The document's contents and history"),
-                      (Tab::Save, "Save", "What doc.save() writes for this document")]
-                        .map(|(tab, label, title)| view! {
-                            <button class:active=move || app.tab.get() == tab title=title
-                                on:click=move |_| app.tab.set(tab)>{label}</button>
-                        })}
-                </nav>
-            </Show>
-            <label class="btn primary">
+            <label class="btn primary open-file">
                 "Open file…"
                 <input type="file" node_ref=input on:change=on_change hidden/>
             </label>
@@ -166,6 +155,34 @@ fn Welcome() -> impl IntoView {
     }
 }
 
+/// The open file's three views, as labelled folder tabs over one body.
+#[component]
+fn Folder() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let tabs = [
+        (Tab::Load, "Load", "The file as loaded"),
+        (Tab::Document, "Document", "The document's objects, maps and text"),
+        (Tab::Save, "Save", "What doc.save() writes for this document"),
+    ];
+    view! {
+        <div class="folder">
+            <nav class="folder-tabs">
+                {tabs.map(|(tab, label, title)| view! {
+                    <button class:active=move || app.tab.get() == tab title=title
+                        on:click=move |_| app.tab.set(tab)>{label}</button>
+                })}
+            </nav>
+            <div class="folder-body">
+                {move || match app.tab.get() {
+                    Tab::Load => view! { <storage::StorageTab/> }.into_any(),
+                    Tab::Document => view! { <document::DocumentTab/> }.into_any(),
+                    Tab::Save => view! { <storage::SaveTab/> }.into_any(),
+                }}
+            </div>
+        </div>
+    }
+}
+
 #[component]
 fn App() -> impl IntoView {
     let app = AppState::new();
@@ -196,11 +213,7 @@ fn App() -> impl IntoView {
                     if app.file.with(|f| f.is_none()) {
                         view! { <Welcome/> }.into_any()
                     } else {
-                        match app.tab.get() {
-                            Tab::Load => view! { <storage::StorageTab/> }.into_any(),
-                            Tab::Document => view! { <document::DocumentTab/> }.into_any(),
-                            Tab::Save => view! { <storage::SaveTab/> }.into_any(),
-                        }
+                        view! { <Folder/> }.into_any()
                     }
                 }}
             </main>

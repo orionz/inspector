@@ -102,6 +102,17 @@ header.top {
 .link:hover { text-decoration: underline; }
 .status { padding: 6px 16px; background: var(--sel); border-bottom: 1px solid var(--line); }
 main { padding: 12px 16px 40px; }
+.open-file { margin-left: auto; }
+.folder { --folder: color-mix(in srgb, var(--panel-2) 45%, var(--bg)); max-width: 1240px; margin: 0 auto; }
+.folder-tabs { display: flex; align-items: flex-end; gap: 4px; padding-left: 10px; position: relative; z-index: 1; }
+.folder-tabs button {
+  min-width: 110px; padding: 7px 18px 6px;
+  border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0;
+  background: var(--panel-2); color: var(--dim); font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.folder-tabs button:hover { color: var(--text); }
+.folder-tabs button.active { background: var(--folder); color: var(--text); margin-bottom: -1px; padding-bottom: 7px; }
+.folder-body { min-height: 60vh; padding: 16px; background: var(--folder); border: 1px solid var(--line); border-radius: 10px; }
 
 .drop-overlay {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
@@ -287,7 +298,7 @@ pre.hex { white-space: pre-wrap; word-break: break-all; background: var(--panel-
 .doc-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: 12px; align-items: start; }
 .doc-side { position: sticky; top: 56px; }
 .tree-card { min-height: 300px; }
-.tree { max-height: calc(100vh - 290px); min-height: 240px; overflow: auto; font-family: var(--mono); font-size: 12.5px; }
+.tree { max-height: calc(100vh - 190px); min-height: 240px; overflow: auto; font-family: var(--mono); font-size: 12.5px; }
 .tree .row { display: flex; gap: 6px; align-items: baseline; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
 .tree .row:hover { background: var(--panel-2); }
 .tree .row.obj { cursor: pointer; }

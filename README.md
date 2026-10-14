@@ -6,6 +6,8 @@ in its history. Everything runs locally in the browser.
 
 ## What it shows
 
+The three views sit on folder tabs above the file area.
+
 **Load tab**
 - The file as a vertical stack of chunks, coloured by type (document, change,
   compressed change, change set, v0 bundle). Block height follows chunk size,
@@ -34,11 +36,8 @@ in its history. Everything runs locally in the browser.
   span) and encoded bytes. Raw value columns show bytes per value type.
 
 **Document tab**
-- A history slider over every change in causal order, with an ops-per-change
-  histogram, step controls, and details of the change at the cursor.
-- The document at that point as a lazy, collapsible tree. Each value shows the
-  author/actor and time of the op that set it; click it to jump there.
-- An actors table: author, changes, ops, active period.
+- The document as a lazy, collapsible tree of its maps, lists and text. Each
+  value shows the author/actor and time of the op that set it.
 
 **Save tab**
 - The Load tab's view of what `doc.save()` writes after loading the file, with
