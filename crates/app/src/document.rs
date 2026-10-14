@@ -1,43 +1,28 @@
-use am_inspect::doc::{DocModel, Entry, NodeValue};
-use am_inspect::format_time;
-use automerge::{ObjType, ROOT};
 use leptos::prelude::*;
 
 use crate::fmt;
 use crate::state::{AppState, Crumb, DocMode};
-
-fn with_model<R>(app: AppState, f: impl FnOnce(&DocModel) -> R) -> Option<R> {
-    app.model.with(|m| match m.as_deref() {
-        Some(Ok(m)) => Some(f(m)),
-        _ => None,
-    })
-}
-
-fn with_model_untracked<R>(app: AppState, f: impl FnOnce(&DocModel) -> R) -> Option<R> {
-    app.model.with_untracked(|m| match m.as_deref() {
-        Some(Ok(m)) => Some(f(m)),
-        _ => None,
-    })
-}
+use crate::worker::{use_query, Entry, ObjKind, Req, Resp, Value};
 
 #[component]
 pub fn DocumentTab() -> impl IntoView {
     let app = expect_context::<AppState>();
     move || {
-        app.model.with(|m| match m.as_deref() {
-            None => view! { <div class="card dim">"Loading document…"</div> }.into_any(),
+        app.doc.with(|d| match d {
+            None => view! { <div class="card busy-wrap busy"><p class="dim">"Loading document…"</p></div> }.into_any(),
             Some(Err(e)) => view! {
                 <div class="card error">"automerge could not load this file: " {e.clone()}</div>
             }
             .into_any(),
-            Some(Ok(_)) => {
+            Some(Ok(sum)) => {
+                let changes = sum.changes;
                 let tab = move |mode: DocMode, label: &'static str| view! {
                     <button class:active=move || app.doc_mode.get() == mode on:click=move |_| app.doc_mode.set(mode)>
                         <span>{label}</span>
                     </button>
                 };
                 view! {
-                    <Scrubber/>
+                    <Scrubber changes=changes/>
                     <DocBrowser/>
                     <nav class="side-tabs">{tab(DocMode::Value, "Value")}{tab(DocMode::Ops, "Ops")}{tab(DocMode::Json, "JSON")}</nav>
                 }
@@ -53,12 +38,12 @@ pub fn DocumentTab() -> impl IntoView {
 fn DocBrowser() -> impl IntoView {
     let app = expect_context::<AppState>();
     let levels = move || {
-        let root = Crumb { key: "/".into(), id: ROOT, ty: ObjType::Map, len: 0 };
+        let root = Crumb { key: "/".into(), id: "_root".into(), kind: ObjKind::Map, len: 0 };
         std::iter::once(root).chain(app.doc_path.get()).enumerate().collect::<Vec<_>>()
     };
     view! {
         <div class="doc-view">
-            <For each=levels key=|(level, c)| (*level, format!("{:?}", c.id))
+            <For each=levels key=|(level, c)| (*level, c.id.clone())
                 children=|(level, c)| view! { <DocLevel level=level crumb=c/> }/>
         </div>
     }
@@ -66,80 +51,92 @@ fn DocBrowser() -> impl IntoView {
 
 const PANE_LIMIT: usize = 500;
 const BAND_STRIPES: usize = 200;
+const OPS_PAGE: usize = 200;
+const JSON_LIMIT: usize = 2 << 20;
+const TEXT_CHARS: usize = 20_000;
 
 #[component]
 fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
     let app = expect_context::<AppState>();
     let band = move || app.doc_path.with(|p| p.len() > level);
     let limit = RwSignal::new(PANE_LIMIT);
-    let obj = crumb.id.clone();
-    let ty = crumb.ty;
-    let title = crumb.key.clone();
-    let body = move || {
-        let heads = app.heads.get();
-        let heads = heads.as_deref();
-        if band() {
-            let sel = app.doc_path.with(|p| p.get(level).map(|c| c.key.clone()));
-            return with_model(app, |m| {
-                let page = m.page(&obj, heads, 0, BAND_STRIPES + 1);
-                let stripes = (page.total <= BAND_STRIPES && ty != ObjType::Text).then(|| {
-                    page.entries.into_iter().map(|e| {
-                        let key = if ty == ObjType::List { format!("[{}]", e.key) } else { e.key.clone() };
-                        let is_sel = sel.as_deref() == Some(key.as_str());
-                        let target = match &e.value {
-                            NodeValue::Object { id, ty, len } if !is_sel => Some(Crumb { key: key.clone(), id: id.clone(), ty: *ty, len: *len }),
-                            _ => None,
-                        };
-                        let is_obj = matches!(e.value, NodeValue::Object { .. });
-                        view! {
-                            <div class="doc-stripe" class:obj=is_obj class:sel=is_sel title=key
-                                on:click=move |ev| {
-                                    ev.stop_propagation();
-                                    open_at(app, level, target.clone());
-                                }></div>
-                        }
-                    }).collect_view()
-                });
-                view! {
-                    <div class="doc-band" on:click=move |_| open_at(app, level, None)>
-                        {stripes}
-                        <span class="doc-band-title">{title.clone()}</span>
-                    </div>
-                }
-                .into_any()
-            });
-        }
-        match app.doc_mode.get() {
-            DocMode::Ops => return Some(view! { <ObjOps obj=obj.clone() title=title.clone()/> }.into_any()),
-            DocMode::Json => {
-                return with_model(app, |m| {
-                    let (json, cut) = m.json(&obj, heads, JSON_LIMIT);
-                    view! {
-                        <div class="card doc-pane text-pane">
-                            <div class="card-title">{pane_title(&title, &obj)}<span class="dim">"JSON"</span></div>
-                            <pre class="json">{json}{cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}</pre>
-                        </div>
-                    }
-                    .into_any()
-                });
+    let text_chars = RwSignal::new(TEXT_CHARS);
+    let ops_page = RwSignal::new(0usize);
+    let Crumb { key: title, id: obj, kind, .. } = crumb;
+    let (band_data, _) = {
+        let obj = obj.clone();
+        use_query(format!("band:{level}"), move || {
+            (band() && kind != ObjKind::Text)
+                .then(|| Req::Page { obj: obj.clone(), step: app.step.get(), limit: BAND_STRIPES + 1 })
+        })
+    };
+    let (pane_data, busy) = {
+        let obj = obj.clone();
+        use_query(format!("pane:{level}"), move || {
+            if band() {
+                return None;
             }
-            DocMode::Value => {}
+            let (obj, step) = (obj.clone(), app.step.get());
+            Some(match app.doc_mode.get() {
+                DocMode::Ops => Req::Ops { obj, start: ops_page.get() * OPS_PAGE, limit: OPS_PAGE },
+                DocMode::Json => Req::Json { obj, step, limit: JSON_LIMIT },
+                DocMode::Value if kind == ObjKind::Text => Req::Text { obj, step, limit_chars: text_chars.get() },
+                DocMode::Value => Req::Page { obj, step, limit: limit.get() },
+            })
+        })
+    };
+    let band_view = {
+        let title = title.clone();
+        move || {
+            let sel = app.doc_path.with(|p| p.get(level).map(|c| c.key.clone()));
+            let stripes = band_data.with(|d| match d {
+                Some(Resp::Page { entries, total }) if *total <= BAND_STRIPES => Some(
+                    entries
+                        .iter()
+                        .map(|e| {
+                            let key = if kind == ObjKind::List { format!("[{}]", e.key) } else { e.key.clone() };
+                            let is_sel = sel.as_deref() == Some(key.as_str());
+                            let target = match &e.value {
+                                Value::Object { id, kind, len } if !is_sel => {
+                                    Some(Crumb { key: key.clone(), id: id.clone(), kind: *kind, len: *len })
+                                }
+                                _ => None,
+                            };
+                            let is_obj = matches!(e.value, Value::Object { .. });
+                            view! {
+                                <div class="doc-stripe" class:obj=is_obj class:sel=is_sel title=key
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        open_at(app, level, target.clone());
+                                    }></div>
+                            }
+                        })
+                        .collect_view(),
+                ),
+                _ => None,
+            });
+            view! {
+                <div class="doc-band" on:click=move |_| open_at(app, level, None)>
+                    {stripes}
+                    <span class="doc-band-title">{title.clone()}</span>
+                </div>
+            }
         }
-        with_model(app, |m| {
-            let header = |len: usize| view! {
-                <div class="card-title">{pane_title(&title, &obj)}<span class="dim">{obj_label(ty, len)}</span></div>
-            };
-            if ty == ObjType::Text {
-                let text = m.text(&obj, heads);
-                let chars = text.chars().count();
-                let marks = m.marks(&obj, heads);
-                let shown: String = text.chars().take(limit.get() * 40).collect();
-                return view! {
+    };
+    let pane_view = move || {
+        let head = |extra: String| view! {
+            <div class="card-title">{pane_title(&title, &obj)}<span class="dim">{extra}</span></div>
+        };
+        let body = pane_data.with(|d| match d {
+            None => view! { <div class="card doc-pane">{head(String::new())}</div> }.into_any(),
+            Some(Resp::Text { text, chars, marks }) => {
+                let chars = *chars;
+                view! {
                     <div class="card doc-pane text-pane">
-                        {header(chars)}
-                        <pre class="text">{shown}{(chars > limit.get() * 40).then(|| "…")}</pre>
-                        {(chars > limit.get() * 40).then(|| view! {
-                            <button class="link" on:click=move |_| limit.update(|l| *l *= 4)>{format!("show more of {} chars", fmt::count(chars))}</button>
+                        {head(obj_label(ObjKind::Text, chars))}
+                        <pre class="text">{text.clone()}{(chars > text.chars().count()).then(|| "…")}</pre>
+                        {(chars > text_chars.get_untracked()).then(|| view! {
+                            <button class="link" on:click=move |_| text_chars.update(|l| *l *= 4)>{format!("show more of {} chars", fmt::count(chars))}</button>
                         })}
                         {(!marks.is_empty()).then(|| view! {
                             <div class="marks">
@@ -149,132 +146,128 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                         })}
                     </div>
                 }
-                .into_any();
+                .into_any()
             }
-            let page = m.page(&obj, heads, 0, limit.get());
-            let total = page.total;
-            let more = (total > limit.get()).then(|| view! {
-                <button class="link more" on:click=move |_| limit.update(|l| *l += PANE_LIMIT)>
-                    {format!("show more ({} of {})", limit.get_untracked(), fmt::count(total))}
-                </button>
-            });
-            let list = matches!(ty, ObjType::List);
-            let entries = if list {
-                let items = page.entries.into_iter().enumerate().map(|(i, e)| view! {
-                    {(i > 0).then(|| view! { <span class="sep">", "</span> })}
-                    <DocValue entry=e level=level in_list=true/>
-                }).collect_view();
-                view! { <div class="doc-list mono"><span class="sep">"[ "</span>{items}<span class="sep">{if total > limit.get() { " … ]" } else { " ]" }}</span></div> }.into_any()
-            } else {
-                let rows = page.entries.into_iter().map(|e| {
-                    let key = e.key.clone();
-                    view! { <div class="doc-key">{key}</div><div class="doc-val"><DocValue entry=e level=level in_list=false/></div> }
-                }).collect_view();
-                view! { <div class="doc-map mono">{rows}</div> }.into_any()
-            };
-            view! {
-                <div class="card doc-pane">
-                    {header(total)}
-                    {entries}
-                    {(total == 0).then(|| view! { <p class="dim">"(empty)"</p> })}
-                    {more}
-                </div>
-            }
-            .into_any()
-        })
-    };
-    view! { <div class="doc-level" class:band=band>{body}</div> }
-}
-
-const OPS_PAGE: usize = 200;
-const JSON_LIMIT: usize = 2 << 20;
-
-/// The ops whose object is `obj`, as logical rows.
-#[component]
-fn ObjOps(obj: automerge::ObjId, title: String) -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let page = RwSignal::new(0usize);
-    move || {
-        with_model(app, |m| {
-            let ops = m.object_ops(&obj);
-            let total = ops.len();
-            let first = (page.get() * OPS_PAGE).min(total);
-            let rows = ops[first..(first + OPS_PAGE).min(total)].iter().map(|op| {
-                let (_, origin) = origin_label(app, op.change);
+            Some(Resp::Page { entries, total }) => {
+                let total = *total;
+                let list = kind == ObjKind::List;
+                let shown = entries.len();
+                let items = if list {
+                    let items = entries.iter().enumerate().map(|(i, e)| view! {
+                        {(i > 0).then(|| view! { <span class="sep">", "</span> })}
+                        <DocValue entry=e.clone() level=level in_list=true/>
+                    }).collect_view();
+                    view! {
+                        <div class="doc-list mono">
+                            <span class="sep">"[ "</span>{items}<span class="sep">{if total > shown { " … ]" } else { " ]" }}</span>
+                        </div>
+                    }
+                    .into_any()
+                } else {
+                    let rows = entries.iter().map(|e| view! {
+                        <div class="doc-key">{e.key.clone()}</div>
+                        <div class="doc-val"><DocValue entry=e.clone() level=level in_list=false/></div>
+                    }).collect_view();
+                    view! { <div class="doc-map mono">{rows}</div> }.into_any()
+                };
                 view! {
-                    <tr title=origin class:future=op.change.is_some_and(|c| c >= app.step.get())>
-                        <td>{op.id.clone()}</td>
-                        <td>{op.key.clone()}</td>
-                        <td>{op.action.clone()}</td>
-                        <td>{op.pred.clone()}</td>
-                    </tr>
-                }
-            }).collect_view();
-            let pages = total.div_ceil(OPS_PAGE);
-            view! {
-                <div class="card doc-pane">
-                    <div class="card-title">
-                        {pane_title(&title, &obj)}
-                        <span class="dim">{format!("{} ops", fmt::count_exact(total))}</span>
-                        {(pages > 1).then(|| view! {
-                            <span class="pager">
-                                <button disabled=move || page.get() == 0 on:click=move |_| page.update(|p| *p -= 1)>"‹"</button>
-                                <span>{move || format!("page {} / {pages}", page.get() + 1)}</span>
-                                <button disabled=move || page.get() + 1 >= pages on:click=move |_| page.update(|p| *p += 1)>"›"</button>
-                            </span>
+                    <div class="card doc-pane">
+                        {head(obj_label(kind, total))}
+                        {items}
+                        {(total == 0).then(|| view! { <p class="dim">"(empty)"</p> })}
+                        {(total > shown).then(|| view! {
+                            <button class="link more" on:click=move |_| limit.update(|l| *l += PANE_LIMIT)>
+                                {format!("show more ({shown} of {})", fmt::count(total))}
+                            </button>
                         })}
                     </div>
-                    <table class="dense rows mono">
-                        <thead><tr><th>"id"</th><th>"key"</th><th>"Action"</th><th>"pred"</th></tr></thead>
-                        <tbody>{rows}</tbody>
-                    </table>
+                }
+                .into_any()
+            }
+            Some(Resp::Json { json, cut }) => view! {
+                <div class="card doc-pane text-pane">
+                    {head("JSON".into())}
+                    <pre class="json">{json.clone()}{cut.then(|| format!("\n… cut off after {}", fmt::bytes(JSON_LIMIT)))}</pre>
                 </div>
             }
-        })
+            .into_any(),
+            Some(Resp::Ops { ops, total }) => {
+                let total = *total;
+                let pages = total.div_ceil(OPS_PAGE);
+                let rows = ops.iter().map(|op| {
+                    let change = op.change;
+                    view! {
+                        <tr title=op.origin.clone() class:future=move || change.is_some_and(|c| c >= app.step.get())>
+                            <td>{op.id.clone()}</td>
+                            <td>{op.key.clone()}</td>
+                            <td>{op.action.clone()}</td>
+                            <td>{op.pred.clone()}</td>
+                        </tr>
+                    }
+                }).collect_view();
+                view! {
+                    <div class="card doc-pane">
+                        <div class="card-title">
+                            {pane_title(&title, &obj)}
+                            <span class="dim">{format!("{} ops", fmt::count_exact(total))}</span>
+                            {(pages > 1).then(|| view! {
+                                <span class="pager">
+                                    <button disabled=move || ops_page.get() == 0 on:click=move |_| ops_page.update(|p| *p -= 1)>"‹"</button>
+                                    <span>{move || format!("page {} / {pages}", ops_page.get() + 1)}</span>
+                                    <button disabled=move || ops_page.get() + 1 >= pages on:click=move |_| ops_page.update(|p| *p += 1)>"›"</button>
+                                </span>
+                            })}
+                        </div>
+                        <table class="dense rows mono">
+                            <thead><tr><th>"id"</th><th>"key"</th><th>"Action"</th><th>"pred"</th></tr></thead>
+                            <tbody>{rows}</tbody>
+                        </table>
+                    </div>
+                }
+                .into_any()
+            }
+            Some(other) => view! { <div class="card error">{format!("{other:?}")}</div> }.into_any(),
+        });
+        view! { <div class="busy-wrap" class:busy=move || busy.get()>{body}</div> }
+    };
+    view! {
+        <div class="doc-level" class:band=band>
+            {move || if band() { band_view.clone()().into_any() } else { pane_view.clone()().into_any() }}
+        </div>
     }
 }
 
 /// A pane's name with its object id, e.g. `items 2@f018`.
-fn pane_title(title: &str, obj: &automerge::ObjId) -> impl IntoView {
-    let full = obj.to_string();
-    let short = match full.split_once('@') {
+fn pane_title(title: &str, obj: &str) -> impl IntoView {
+    let short = match obj.split_once('@') {
         Some((ctr, actor)) => format!("{ctr}@{}", &actor[..actor.len().min(4)]),
         None => "ROOT".into(),
     };
-    view! { <b class="mono">{title.to_string()}</b><span class="mono obj-id" title=full>{short}</span> }
+    view! { <b class="mono">{title.to_string()}</b><span class="mono obj-id" title=obj.to_string()>{short}</span> }
 }
 
 /// A bar across the top of the document: dragging it shows the document as
 /// it was after that many changes.
 #[component]
-fn Scrubber() -> impl IntoView {
+fn Scrubber(changes: usize) -> impl IntoView {
     let app = expect_context::<AppState>();
-    let n = with_model_untracked(app, |m| m.changes.len()).unwrap_or(0);
-    let pending = StoredValue::new(None::<usize>);
-    let on_input = move |ev: leptos::ev::Event| {
-        let v = event_target_value(&ev).parse().unwrap_or(n);
-        let idle = pending.get_value().is_none();
-        pending.set_value(Some(v));
-        if idle {
-            request_animation_frame(move || {
-                if let Some(v) = pending.get_value() {
-                    pending.set_value(None);
-                    app.step.set(v);
-                }
-            });
-        }
-    };
-    let label = move || {
+    let n = changes;
+    let (time, _) = use_query("scrub".into(), move || {
         let k = app.step.get();
-        with_model(app, |m| match k {
-            0 => format!("0 / {n} changes"),
-            k if k >= n => format!("{n} / {n} changes · now"),
-            k => format!("{k} / {n} changes · {}", format_time(m.changes[k - 1].time)),
-        })
+        (k > 0 && k < n).then(|| Req::ChangeTime { index: k - 1 })
+    });
+    let label = move || match app.step.get() {
+        0 => format!("0 / {n} changes"),
+        k if k >= n => format!("{n} / {n} changes · now"),
+        k => match time.get() {
+            Some(Resp::Time(t)) => format!("{k} / {n} changes · {t}"),
+            _ => format!("{k} / {n} changes"),
+        },
     };
     view! {
         <div class="scrubber">
-            <input type="range" min="0" max=n.to_string() prop:value=move || app.step.get().to_string() on:input=on_input/>
+            <input type="range" min="0" max=n.to_string() prop:value=move || app.step.get().to_string()
+                on:input=move |ev| app.step.set(event_target_value(&ev).parse().unwrap_or(n))/>
             <span>{label}</span>
         </div>
     }
@@ -293,24 +286,22 @@ fn open_at(app: AppState, level: usize, target: Option<Crumb>) {
 #[component]
 fn DocValue(entry: Entry, level: usize, in_list: bool) -> impl IntoView {
     let app = expect_context::<AppState>();
-    let (_, origin) = origin_label(app, entry.origin);
     let conflict = entry.conflict.then(|| view! { <span class="conflict" title="concurrent values; showing the winner">"⚡"</span> });
-    let title = format!("{origin}\nop {}", entry.op_id);
     match entry.value {
-        NodeValue::Scalar { text, kind } => view! {
-            <span class=format!("val v-{kind}") title=title>{text}</span>{conflict}
+        Value::Scalar { text, kind } => view! {
+            <span class=format!("val v-{kind}") title=entry.origin>{text}</span>{conflict}
         }
         .into_any(),
-        NodeValue::Object { id, ty, len } => {
+        Value::Object { id, kind, len } => {
             let key = if in_list { format!("[{}]", entry.key) } else { entry.key.clone() };
-            let crumb = Crumb { key, id, ty, len };
+            let crumb = Crumb { key, id, kind, len };
             let sel = {
                 let crumb = crumb.clone();
                 move || app.doc_path.with(|p| p.get(level) == Some(&crumb))
             };
             view! {
-                <button class="obj-chip" class:sel=sel title=title
-                    on:click=move |_| open_at(app, level, Some(crumb.clone()))>{obj_label(ty, len)}</button>
+                <button class="obj-chip" class:sel=sel title=entry.origin
+                    on:click=move |_| open_at(app, level, Some(crumb.clone()))>{obj_label(kind, len)}</button>
                 {conflict}
             }
             .into_any()
@@ -318,37 +309,11 @@ fn DocValue(entry: Entry, level: usize, in_list: bool) -> impl IntoView {
     }
 }
 
-fn origin_label(app: AppState, origin: Option<usize>) -> (String, String) {
-    with_model_untracked(app, |m| {
-        origin
-            .and_then(|i| m.changes.get(i).map(|c| (i, c)))
-            .map(|(i, c)| {
-                let who = c
-                    .author
-                    .clone()
-                    .unwrap_or_else(|| m.short_actor(&c.actor).to_string());
-                (
-                    format!("{who} · {}", format_time(c.time)),
-                    format!(
-                        "set in change #{} ({}@{}) by {who} at {}{}",
-                        i + 1,
-                        c.seq,
-                        m.short_actor(&c.actor),
-                        format_time(c.time),
-                        c.message.as_ref().map(|m| format!("\n“{m}”")).unwrap_or_default()
-                    ),
-                )
-            })
-    })
-    .flatten()
-    .unwrap_or_default()
-}
-
-fn obj_label(ty: ObjType, len: usize) -> String {
-    match ty {
-        ObjType::Map => format!("{{map {len}}}"),
-        ObjType::Table => format!("{{table {len}}}"),
-        ObjType::List => format!("[list {len}]"),
-        ObjType::Text => format!("text {len} chars"),
+fn obj_label(kind: ObjKind, len: usize) -> String {
+    match kind {
+        ObjKind::Map => format!("{{map {len}}}"),
+        ObjKind::Table => format!("{{table {len}}}"),
+        ObjKind::List => format!("[list {len}]"),
+        ObjKind::Text => format!("text {len} chars"),
     }
 }

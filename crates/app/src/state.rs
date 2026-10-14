@@ -1,9 +1,12 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use am_inspect::{parse_structure, DocModel, FileReport};
-use automerge::{Automerge, ChangeHash, LoadOptions, ObjId, ObjType, OnPartialLoad};
+use std::collections::HashSet;
+
+use am_inspect::{parse_structure, FileReport};
 use leptos::prelude::*;
+
+use crate::worker::{self, ObjKind, Req, Resp, Summary};
 
 #[derive(Clone)]
 pub struct Loaded {
@@ -41,8 +44,8 @@ pub enum DocMode {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Crumb {
     pub key: String,
-    pub id: ObjId,
-    pub ty: ObjType,
+    pub id: String,
+    pub kind: ObjKind,
     pub len: usize,
 }
 
@@ -77,7 +80,8 @@ pub struct AppState {
         RwSignal<Option<ColumnRef>>,
         RwSignal<(GroupView, GroupView)>,
     ),
-    pub model: Local<Option<Rc<Result<DocModel, String>>>>,
+    /// The document as the worker loaded it; `None` while it loads.
+    pub doc: RwSignal<Option<Result<Summary, String>>>,
     pub status: RwSignal<Option<String>>,
     pub tab: RwSignal<Tab>,
     /// The chunk whose detail panels are open; `None` shows the chunk stack.
@@ -85,8 +89,8 @@ pub struct AppState {
     pub part: RwSignal<Option<Part>>,
     pub column: RwSignal<Option<ColumnRef>>,
     pub group_view: RwSignal<(GroupView, GroupView)>,
+    /// How many changes of history the document view shows.
     pub step: RwSignal<usize>,
-    pub heads: RwSignal<Option<Vec<ChangeHash>>>,
     /// Objects opened in the document view, from just below the root.
     pub doc_path: RwSignal<Vec<Crumb>>,
     pub doc_mode: RwSignal<DocMode>,
@@ -104,7 +108,7 @@ impl AppState {
                 RwSignal::new(None),
                 RwSignal::new((GroupView::Physical, GroupView::Physical)),
             ),
-            model: RwSignal::new_local(None),
+            doc: RwSignal::new(None),
             status: RwSignal::new(None),
             tab: RwSignal::new(Tab::Load),
             chunk: RwSignal::new(None),
@@ -112,18 +116,9 @@ impl AppState {
             column: RwSignal::new(None),
             group_view: RwSignal::new((GroupView::Physical, GroupView::Physical)),
             step: RwSignal::new(0),
-            heads: RwSignal::new(None),
             doc_path: RwSignal::new(Vec::new()),
             doc_mode: RwSignal::new(DocMode::Value),
         };
-        Effect::new(move |_| {
-            let step = state.step.get();
-            let heads = state.model.with(|m| match m.as_deref() {
-                Some(Ok(m)) => m.heads_at(step),
-                _ => None,
-            });
-            state.heads.set(heads);
-        });
         state
     }
 
@@ -137,7 +132,7 @@ impl AppState {
         self.saved_sel.2.set(None);
         self.tab.set(Tab::Load);
         self.status.set(None);
-        self.model.set(None);
+        self.doc.set(None);
         self.doc_path.set(Vec::new());
         self.saved.set(None);
         self.load_ms.0.set(None);
@@ -161,73 +156,58 @@ impl AppState {
                 self.saved_sel.2.set(None);
                 self.group_view
                     .set((GroupView::Physical, GroupView::Physical));
-                self.model.set(None);
+                self.doc.set(None);
                 self.doc_path.set(Vec::new());
                 self.saved.set(None);
                 self.load_ms.0.set(None);
                 self.load_ms.1.set(None);
                 self.file.set(Some(Rc::new(Loaded { name, bytes, report })));
                 self.status.set(Some("Loading document history…".into()));
-                set_timeout(
-                    move || {
-                        let model = self.file.with_untracked(|f| {
-                            let f = f.as_ref()?;
-                            let (doc, ms) = timed(|| {
-                                Automerge::load_with_options(
-                                    &f.bytes,
-                                    LoadOptions::new().on_partial_load(OnPartialLoad::Ignore),
-                                )
-                            });
-                            self.load_ms.0.set(Some(ms));
-                            Some(doc.map(DocModel::from_doc).map_err(|e| e.to_string()))
-                        });
-                        if let Some(model) = model {
-                            let n = model.as_ref().map(|m| m.changes.len()).unwrap_or(0);
-                            if let Ok(m) = &model {
-                                self.file.update(|f| {
-                                    if let Some(f) = f.as_mut().filter(|f| f.report.has_hidden_deps()) {
-                                        resolve_deps(&mut Rc::make_mut(f).report, m);
-                                    }
-                                });
+                let hidden = self.file.with_untracked(|f| f.as_ref().map(|f| f.report.hidden_deps()).unwrap_or_default());
+                let bytes = self.file.with_untracked(|f| f.as_ref().map(|f| f.bytes.clone()).unwrap_or_default());
+                let opened = self.file.with_untracked(|f| f.as_ref().map(Rc::as_ptr));
+                leptos::task::spawn_local(async move {
+                    let Some((Resp::Loaded(doc), saved)) =
+                        worker::call(None, Req::Load { hidden_deps: hidden }, Some(bytes)).await
+                    else {
+                        return;
+                    };
+                    if self.file.with_untracked(|f| f.as_ref().map(Rc::as_ptr)) != opened {
+                        return;
+                    }
+                    if let Ok(sum) = &doc {
+                        self.load_ms.0.set(Some(sum.load_ms));
+                        let known: HashSet<&str> = sum.known_deps.iter().map(String::as_str).collect();
+                        self.file.update(|f| {
+                            if let Some(f) = f.as_mut().filter(|f| f.report.has_hidden_deps()) {
+                                resolve_deps(&mut Rc::make_mut(f).report, &known);
                             }
-                            let saved = model.as_ref().ok().map(|m| {
-                                let bytes = m.doc.save();
-                                let mut report = parse_structure(&bytes);
-                                resolve_deps(&mut report, m);
-                                Rc::new(Loaded { name: "doc.save()".into(), bytes, report })
-                            });
-                            self.saved.set(saved);
-                            self.model.set(Some(Rc::new(model)));
-                            self.step.set(n);
-                            set_timeout(
-                                move || {
-                                    let ms = self.saved.with_untracked(|s| s.as_ref().map(|s| timed(|| Automerge::load(&s.bytes)).1));
-                                    self.load_ms.1.set(ms);
-                                },
-                                Duration::from_millis(30),
-                            );
-                        }
-                        self.status.set(None);
-                    },
-                    Duration::from_millis(30),
-                );
+                        });
+                        let bytes = saved.unwrap_or_default();
+                        let mut report = parse_structure(&bytes);
+                        resolve_deps(&mut report, &sum.saved_known_deps.iter().map(String::as_str).collect());
+                        self.saved.set(Some(Rc::new(Loaded { name: "doc.save()".into(), bytes, report })));
+                        self.step.set(sum.changes);
+                        leptos::task::spawn_local(async move {
+                            if let Some((Resp::Ms(ms), _)) = worker::call(None, Req::SavedLoadMs, None).await {
+                                self.load_ms.1.set(Some(ms));
+                            }
+                        });
+                    }
+                    self.doc.set(Some(doc));
+                    self.status.set(None);
+                });
             },
             Duration::from_millis(30),
         );
     }
 }
 
-/// Settles the dependencies that [`parse_structure`] left in order, using the
-/// changes automerge found inside the file's document chunks.
-fn resolve_deps(report: &mut FileReport, model: &DocModel) {
+/// Settles the dependencies that [`parse_structure`] left in order, given
+/// which of them automerge found inside the file's document chunks.
+fn resolve_deps(report: &mut FileReport, known: &HashSet<&str>) {
     let bulk = report.first_bulk_chunk();
-    report.resolve_deps(|h| bulk.filter(|_| model.has_change(h)));
-}
-
-fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {
-    let start = js_sys::Date::now();
-    let out = f();
-    (out, js_sys::Date::now() - start)
+    report.resolve_deps(|h| bulk.filter(|_| known.contains(h)));
 }
 
 /// A single-entry memo for expensive derived data that isn't `Send`.

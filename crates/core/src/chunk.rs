@@ -269,11 +269,23 @@ impl FileReport {
     /// Whether some change depends on a hash that only a full parse of the
     /// document chunks could find.
     pub fn has_hidden_deps(&self) -> bool {
+        !self.hidden_deps().is_empty()
+    }
+
+    /// The dependencies that aren't a change chunk or another chunk's head.
+    pub fn hidden_deps(&self) -> Vec<String> {
         let seen = self.visible_hashes();
-        self.chunks
+        let mut out: Vec<String> = self
+            .chunks
             .iter()
             .filter(|c| is_change(c))
-            .any(|c| c.facts.deps.iter().any(|d| !seen.contains_key(d)))
+            .flat_map(|c| c.facts.deps.iter())
+            .filter(|d| !seen.contains_key(*d))
+            .cloned()
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// Recomputes each change's [`DepOrder`]; `inside` gives the chunk

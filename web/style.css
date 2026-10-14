@@ -338,6 +338,15 @@ pre.hex { white-space: pre-wrap; word-break: break-all; background: var(--panel-
 .scrubber input { flex: 1; margin: 0; accent-color: var(--accent); }
 .scrubber span { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 34ch; text-align: right; }
 tr.future td { text-decoration: line-through; opacity: .45; }
+.busy-wrap { position: relative; }
+.busy-wrap.busy > * { opacity: .55; transition: opacity .15s .15s; }
+.busy-wrap.busy::after {
+  content: ""; position: absolute; top: 12px; right: 14px; width: 16px; height: 16px; z-index: 2;
+  border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%;
+  animation: spin .7s linear infinite, appear .2s .15s both;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes appear { from { opacity: 0; } }
 .doc-pane.text-pane { min-height: calc(100vh - 140px); box-sizing: border-box; }
 .doc-pane pre.text { max-height: none; overflow: visible; }
 pre.json { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }

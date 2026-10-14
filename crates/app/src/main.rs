@@ -2,6 +2,7 @@ mod document;
 mod fmt;
 mod state;
 mod storage;
+mod worker;
 
 use leptos::html;
 use leptos::prelude::*;
@@ -190,16 +191,13 @@ fn Folder() -> impl IntoView {
     let stats = move || match app.tab.get() {
         Tab::Load => file_stats(app.file, app.load_ms.0),
         Tab::Save => file_stats(app.saved, app.load_ms.1),
-        Tab::Document => app.model.with(|m| match m.as_deref() {
-            Some(Ok(m)) => {
-                let ops: u64 = m.changes.iter().map(|c| c.num_ops()).sum();
-                format!(
-                    "{} ops, {} changes, {} actors",
-                    fmt::count_exact(ops as usize),
-                    fmt::count_exact(m.changes.len()),
-                    fmt::count_exact(m.actors.len())
-                )
-            }
+        Tab::Document => app.doc.with(|d| match d {
+            Some(Ok(d)) => format!(
+                "{} ops, {} changes, {} actors",
+                fmt::count_exact(d.ops as usize),
+                fmt::count_exact(d.changes),
+                fmt::count_exact(d.actors)
+            ),
             _ => String::new(),
         }),
     };
@@ -264,7 +262,17 @@ fn App() -> impl IntoView {
     }
 }
 
+const APP_BUILD: &str = match option_env!("APP_BUILD") {
+    Some(b) => b,
+    None => "dev",
+};
+
 fn main() {
     console_error_panic_hook::set_once();
+    if worker::in_worker() {
+        worker::serve();
+        return;
+    }
+    worker::start(&format!("worker.js?v={APP_BUILD}"));
     mount_to_body(App);
 }

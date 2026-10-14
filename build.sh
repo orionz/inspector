@@ -13,6 +13,8 @@ fi
 # The build number is the commit count, shown in the app header.
 export APP_VERSION="v$(git rev-list --count HEAD 2>/dev/null || echo 0)"
 export APP_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+VERSION="$APP_VERSION-$APP_COMMIT-$(date +%s)"
+export APP_BUILD="$VERSION"
 
 cargo build -p app --target wasm32-unknown-unknown "${CARGO_FLAGS[@]}"
 
@@ -27,9 +29,8 @@ if [[ "$PROFILE" == release ]] && command -v wasm-opt >/dev/null; then
     || echo "wasm-opt failed; shipping the unoptimised module"
 fi
 
-VERSION="$APP_VERSION-$APP_COMMIT-$(date +%s)"
 cp web/* dist/
-sed -i "s/__VERSION__/$VERSION/g" dist/index.html dist/sw.js
+sed -i "s/__VERSION__/$VERSION/g" dist/index.html dist/sw.js dist/worker.js
 cp corpus/* dist/samples/
 touch dist/.nojekyll
 

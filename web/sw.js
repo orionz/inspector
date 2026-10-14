@@ -8,6 +8,7 @@ const SHELL = [
   `style.css?v=${VERSION}`,
   `pkg/automerge-inspector.js?v=${VERSION}`,
   `pkg/automerge-inspector_bg.wasm?v=${VERSION}`,
+  `worker.js?v=${VERSION}`,
   'manifest.webmanifest',
   'icon.svg',
   'icon-192.png',

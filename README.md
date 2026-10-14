@@ -81,14 +81,19 @@ The three views sit on folder tabs above the file area.
 crates/core    am-inspect: structural parser + analysis (native-testable)
   chunk.rs     splits a file into chunks, parses every chunk type into byte sections + column groups
   columns.rs   column specs and names, run-level RLE/bool/delta decoding, row reconstruction
-  doc.rs       automerge-backed history timeline, object pages, per-chunk change decoding
-crates/app     Leptos (CSR) UI compiled to wasm
+  doc.rs       automerge-backed history timeline, object pages, op index, JSON
+crates/app     Leptos (CSR) UI compiled to wasm; also runs as the document worker
 tools/corpus   generator for the sample corpus
 corpus/        sample files, also served as in-app samples
 web/           index.html, styles, service worker, manifest, icons
 ```
 
-Opening a file draws the chunk stack from the structural parse alone. A
+The automerge document lives in a Web Worker (`crates/app/src/worker.rs`,
+the same wasm started from `web/worker.js`), so loading it, scrubbing its
+history and building the per-object op index never block the page: the page
+sends small JSON requests, a pane shows a spinner over its last answer while
+it waits, and requests from the same pane coalesce so only the newest one
+runs next. Opening a file draws the chunk stack from the structural parse alone. A
 change whose dependency sits inside a document chunk (not at its heads) can
 only be placed once automerge has loaded the file, so those late/missing
 colours settle a moment later. The structural parser is independent of automerge's internals, so it reports

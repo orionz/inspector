@@ -49,7 +49,7 @@ pub fn SaveTab() -> impl IntoView {
         if app.saved.with(|f| f.is_some()) {
             return None;
         }
-        let failed = app.model.with(|m| m.as_deref().is_some_and(|m| m.is_err()));
+        let failed = app.doc.with(|d| matches!(d, Some(Err(_))));
         Some(if failed { "The file didn't load as a document, so there's nothing to save." } else { "Loading the document…" })
     };
     view! {
