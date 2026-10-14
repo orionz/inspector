@@ -1,5 +1,6 @@
 mod document;
 mod fmt;
+mod patchwork;
 mod state;
 mod storage;
 mod worker;
@@ -79,6 +80,29 @@ fn open_sample(app: AppState, name: &'static str) {
     });
 }
 
+/// Fetches a Patchwork document from its sync server and opens what it stores.
+fn open_link(app: AppState, link: String) {
+    let Some(id) = patchwork::doc_id(&link) else {
+        app.status.set(Some("That link has no automerge:… document id in it".into()));
+        return;
+    };
+    let title = patchwork::title(&link);
+    let hash = match &title {
+        Some(t) => format!("doc=automerge:{id}&title={}", js_sys::encode_uri_component(t)),
+        None => format!("doc=automerge:{id}"),
+    };
+    let _ = window().location().set_hash(&hash);
+    let name = title.unwrap_or_else(|| format!("automerge:{id}"));
+    app.status.set(Some(format!("Fetching {name} from {}…", patchwork::SERVER)));
+    spawn_local(async move {
+        match patchwork::fetch(&id).await {
+            Ok(pieces) if pieces.is_empty() => app.status.set(Some(format!("The sync server has nothing stored for {name}"))),
+            Ok(pieces) => app.open(name, pieces.concat()),
+            Err(e) => app.status.set(Some(format!("Could not fetch {name}: {e}"))),
+        }
+    });
+}
+
 #[component]
 fn Header() -> impl IntoView {
     let app = expect_context::<AppState>();
@@ -113,6 +137,7 @@ fn Header() -> impl IntoView {
             <div class="brand">
                 <button class="home" title="Back to the start page" on:click=move |_| {
                     if let Some(i) = input.get() { i.set_value(""); }
+                    let _ = window().history().and_then(|h| h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&window().location().pathname().unwrap_or_default())));
                     app.close();
                 }>
                     <svg viewBox="0 0 32 32" class="logo"><use href="#logo"/></svg>
@@ -132,6 +157,7 @@ fn Header() -> impl IntoView {
 #[component]
 fn Welcome() -> impl IntoView {
     let app = expect_context::<AppState>();
+    let link: NodeRef<html::Input> = NodeRef::new();
     view! {
         <div class="welcome">
             <div class="drop-hint">
@@ -140,6 +166,14 @@ fn Welcome() -> impl IntoView {
                 <p>"or use " <b>"Open file…"</b> ". Everything runs locally in your browser; nothing is uploaded."</p>
                 <p class="dim">"Documents, change chunks, compressed changes, change sets and v0 bundles — concatenated in any order."</p>
             </div>
+            <form class="link-form" on:submit=move |ev| {
+                ev.prevent_default();
+                if let Some(i) = link.get() { open_link(app, i.value()); }
+            }>
+                <input type="text" node_ref=link placeholder="Paste a Patchwork link or automerge:… URL"/>
+                <button type="submit" class="btn primary">"Fetch"</button>
+            </form>
+            <p class="dim link-hint">"Fetches the document's stored fragments and commits from " {patchwork::SERVER} "."</p>
             <h2>"Or try a sample"</h2>
             <ul class="samples">
                 {SAMPLES
@@ -226,6 +260,11 @@ fn App() -> impl IntoView {
     let app = AppState::new();
     provide_context(app);
     let dragging = RwSignal::new(false);
+    if let Ok(hash) = window().location().hash() {
+        if patchwork::doc_id(&hash).is_some() {
+            open_link(app, hash);
+        }
+    }
     let on_drop = move |ev: leptos::ev::DragEvent| {
         ev.prevent_default();
         dragging.set(false);

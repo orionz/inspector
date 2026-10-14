@@ -19,4 +19,11 @@ console_error_panic_hook = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 futures-channel = "0.3"
-web-sys = { version = "0.3", features = ["File", "FileList", "Blob", "DragEvent", "DataTransfer", "HtmlInputElement", "Window", "Navigator", "ServiceWorkerContainer", "Location", "Response", "Request", "Element", "DomRect", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "DedicatedWorkerGlobalScope"] }
+futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+future_form = "0.3"
+sedimentree_core = { version = "0.15", default-features = false }
+subduction_core = { version = "0.19", default-features = false }
+subduction_crypto = { version = "0.10", default-features = false }
+getrandom = { version = "0.2", features = ["js"] }
+bs58 = { version = "0.5", features = ["check"] }
+web-sys = { version = "0.3", features = ["File", "FileList", "Blob", "DragEvent", "DataTransfer", "HtmlInputElement", "Window", "Navigator", "ServiceWorkerContainer", "Location", "Response", "Request", "Element", "DomRect", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "DedicatedWorkerGlobalScope", "WebSocket", "BinaryType", "History"] }
