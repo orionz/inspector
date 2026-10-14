@@ -491,13 +491,19 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .fetch-note { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--k-redundant); border-radius: 8px; background: color-mix(in srgb, var(--k-redundant) 12%, var(--panel)); font-size: 13px; }
 .mem-head { display: flex; gap: 12px; align-items: baseline; margin-bottom: 8px; }
 .mem-scroll { overflow-x: auto; padding-bottom: 6px; }
-.mem-tree { display: flex; flex-direction: column; gap: 10px; min-width: 100%; }
-.mem-level { position: relative; height: 26px; }
-.mem-level.slabs { height: 34px; }
-.mem-node { position: absolute; top: 0; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: color-mix(in srgb, var(--accent) 16%, var(--panel)); font-size: 11px; text-align: center; line-height: 24px; overflow: hidden; cursor: pointer; }
-.mem-slab { position: absolute; top: 0; width: 12px; height: 34px; border-radius: 2px; background: color-mix(in srgb, var(--k-change) 55%, var(--panel)); cursor: pointer; }
-.mem-node:hover, .mem-slab:hover { filter: brightness(.9); }
-.mem-node.sel, .mem-slab.sel { outline: 2px solid var(--text); outline-offset: -1px; }
+.mem-tree { display: block; min-width: 100%; }
+.mem-edge { stroke: var(--dim); stroke-width: 1.2; }
+.mem-node { cursor: pointer; }
+.mem-node rect { fill: color-mix(in srgb, var(--accent) 22%, var(--panel)); stroke: var(--line); }
+.mem-node.leaf rect { fill: color-mix(in srgb, var(--k-change) 40%, var(--panel)); }
+.mem-node:hover rect { filter: brightness(.92); }
+.mem-node.sel rect { stroke: var(--text); stroke-width: 2; }
+.mem-node text { font-size: 11px; text-anchor: middle; fill: var(--text); pointer-events: none; }
+.mem-slabs { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0; }
+.mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-change) 30%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
+.mem-slab:hover { filter: brightness(.92); }
+.mem-slab.sel { outline: 2px solid var(--text); color: var(--text); }
+.mem-slab-detail { border-top: 1px solid var(--line); padding-top: 8px; }
 .mem-detail { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12.5px; }
 .mem-detail ul { margin: 6px 0 0; padding-left: 18px; max-height: 320px; overflow: auto; }
 .mem-line { display: grid; grid-template-columns: 80px 1fr; gap: 8px; margin-top: 6px; }

@@ -1069,162 +1069,179 @@ fn RawColumn() -> impl IntoView {
     }
 }
 
-/// One box in the drawn index: a node covering `slabs` of the column's slabs.
-struct TreeBox {
+/// A node of the drawn index.
+struct TreeNode {
+    depth: usize,
+    parent: Option<usize>,
+    /// The slabs under it.
     slabs: std::ops::Range<usize>,
-    /// What clicking it shows: the node's entries, one per line.
+    /// Its entries, one per line: each child's merged weight, or each slab's weight in a leaf.
     entries: Vec<String>,
+    leaf: bool,
+    /// Horizontal centre, in leaf widths.
+    x: f64,
 }
 
-/// The index's nodes level by level from the root, each level in slab order.
-fn tree_levels(node: &NodeDebug) -> Vec<Vec<TreeBox>> {
-    fn walk(node: &NodeDebug, depth: usize, first: usize, levels: &mut Vec<Vec<TreeBox>>) -> usize {
-        if levels.len() <= depth {
-            levels.push(vec![]);
-        }
-        match node {
+/// The index's nodes in depth-first order, placed with leaves side by side
+/// and each internal node centred over its children.
+fn tree_nodes(root: &NodeDebug) -> Vec<TreeNode> {
+    fn walk(node: &NodeDebug, depth: usize, parent: Option<usize>, slab: &mut usize, leaf_x: &mut f64, out: &mut Vec<TreeNode>) -> f64 {
+        let me = out.len();
+        let first = *slab;
+        out.push(TreeNode { depth, parent, slabs: first..first, entries: vec![], leaf: false, x: 0.0 });
+        let x = match node {
             NodeDebug::Leaf { weights } => {
-                levels[depth].push(TreeBox {
-                    slabs: first..first + weights.len(),
-                    entries: weights.iter().enumerate().map(|(i, w)| format!("slab {}: {w}", first + i)).collect(),
-                });
-                weights.len()
+                out[me].entries = weights.iter().enumerate().map(|(i, w)| format!("slab {}: {w}", first + i)).collect();
+                out[me].leaf = true;
+                *slab += weights.len();
+                *leaf_x += 1.0;
+                *leaf_x - 0.5
             }
             NodeDebug::Internal { children } => {
-                let entries = children
+                out[me].entries = children
                     .iter()
                     .enumerate()
                     .map(|(i, (agg, n, _))| format!("child {i}: {n} slabs · {agg}"))
                     .collect();
-                let mut at = first;
-                for (_, _, child) in children {
-                    at += walk(child, depth + 1, at, levels);
-                }
-                levels[depth].push(TreeBox { slabs: first..at, entries });
-                at - first
+                let xs: Vec<f64> = children.iter().map(|(_, _, c)| walk(c, depth + 1, Some(me), slab, leaf_x, out)).collect();
+                (xs.first().copied().unwrap_or(0.0) + xs.last().copied().unwrap_or(0.0)) / 2.0
             }
-        }
+        };
+        out[me].slabs = first..*slab;
+        out[me].x = x;
+        x
     }
-    let mut levels = vec![];
-    walk(node, 0, 0, &mut levels);
-    levels
+    let mut out = vec![];
+    walk(root, 0, None, &mut 0, &mut 0.0, &mut out);
+    out
 }
 
-/// Width of one slab in the drawn tree.
-const SLAB_W: f64 = 14.0;
+/// Horizontal room per leaf, squeezed between these so the tree fits about
+/// `TREE_FIT` px, and the drawn node's size, in px.
+const LEAF_W: (f64, f64) = (10.0, 44.0);
+const TREE_FIT: f64 = 960.0;
+const NODE_W: f64 = 36.0;
+/// Slab boxes shown for one node; pick a lower node to see the rest.
+const SLABS_SHOWN: usize = 1024;
+const NODE_H: f64 = 22.0;
+const LEVEL_H: f64 = 64.0;
 
-#[derive(Clone, Copy, PartialEq)]
-enum MemPick {
-    Node(usize, usize),
-    Slab(usize),
-}
-
-/// The selected column loaded into hexane: its slab index drawn as a tree
-/// over its slabs, with the picked node or slab spelled out below.
+/// The selected column loaded into hexane: its slab index drawn as a tree.
+/// Clicking a node shows its entries and its slabs; clicking a slab spells
+/// out its bytes, segments and realized values.
 #[component]
 fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let app = expect_context::<AppState>();
-    let pick = RwSignal::new(None::<MemPick>);
-    let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<Vec<TreeBox>>), String>> = Cache::new();
+    let node = RwSignal::new(0usize);
+    let slab = RwSignal::new(None::<usize>);
+    let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<TreeNode>), String>> = Cache::new();
     move || {
         let mem = with_chunk(app, |f, c| {
             let col = c.group(sel.ops)?.columns.get(sel.index)?.clone();
             Some(cache.get((file_key(f), c.index, sel), || {
                 column_memory(&col).map(|m| {
-                    let levels = m.index.as_ref().map(tree_levels).unwrap_or_default();
-                    (m, levels)
+                    let nodes = m.index.as_ref().map(tree_nodes).unwrap_or_default();
+                    (m, nodes)
                 })
             }))
         })
         .flatten()?;
-        let (m, levels) = match &*mem {
+        let (m, nodes) = match &*mem {
             Ok(v) => v,
             Err(e) => return Some(view! { <p class="dim">{e.clone()}</p> }.into_any()),
         };
-        let n = m.slabs.len();
-        let width = n as f64 * SLAB_W;
-        let rows = levels
+        let leaves = nodes.iter().filter(|n| n.leaf).count().max(1);
+        let depth = nodes.iter().map(|n| n.depth).max().unwrap_or(0);
+        let leaf_w = (TREE_FIT / leaves as f64).clamp(LEAF_W.0, LEAF_W.1);
+        let width = leaves as f64 * leaf_w + NODE_W;
+        let height = depth as f64 * LEVEL_H + NODE_H + 4.0;
+        let pos = |n: &TreeNode| (n.x * leaf_w + NODE_W / 2.0, n.depth as f64 * LEVEL_H + 2.0);
+        let edges = nodes
             .iter()
-            .enumerate()
-            .map(|(d, level)| {
-                let boxes = level
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| {
-                        let me = MemPick::Node(d, i);
-                        view! {
-                            <div class="mem-node" class:sel=move || pick.get() == Some(me)
-                                style:left=format!("{}px", b.slabs.start as f64 * SLAB_W)
-                                style:width=format!("{}px", b.slabs.len() as f64 * SLAB_W - 2.0)
-                                title=format!("{} slabs", b.slabs.len())
-                                on:click=move |_| pick.set(Some(me))>
-                                {(b.slabs.len() >= 3).then(|| b.slabs.len().to_string())}
-                            </div>
-                        }
-                    })
-                    .collect_view();
-                view! { <div class="mem-level">{boxes}</div> }
+            .filter_map(|n| {
+                let (x2, y2) = pos(n);
+                let (x1, y1) = pos(&nodes[n.parent?]);
+                Some(view! { <line class="mem-edge" x1=x1 y1=y1 + NODE_H x2=x2 y2=y2/> })
             })
             .collect_view();
-        let slabs = (0..n)
-            .map(|i| {
-                let me = MemPick::Slab(i);
-                let s = &m.slabs[i].debug;
+        let boxes = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let (x, y) = pos(n);
+                let w = if n.leaf { NODE_W.min(leaf_w - 2.0) } else { NODE_W };
+                let label = (w >= 24.0).then(|| n.slabs.len().to_string());
                 view! {
-                    <div class="mem-slab" class:sel=move || pick.get() == Some(me)
-                        style:left=format!("{}px", i as f64 * SLAB_W)
-                        title=format!("slab {i}: {} items, {} segments, {} bytes", s.len, s.segments, s.bytes.len())
-                        on:click=move |_| pick.set(Some(me))></div>
+                    <g class="mem-node" class:leaf=n.leaf class:sel=move || node.get() == i
+                        on:click=move |_| { node.set(i); slab.set(None); }>
+                        <title>{format!("{} · {} slabs", if n.leaf { "leaf" } else { "internal node" }, n.slabs.len())}</title>
+                        <rect x=x - w / 2.0 y=y width=w height=NODE_H rx=if w < 12.0 { 2 } else { 5 }/>
+                        <text x=x y=y + NODE_H / 2.0 + 4.0>{label}</text>
+                    </g>
                 }
             })
             .collect_view();
         let held = StoredValue::new_local(mem.clone());
         let detail = move || {
             let mem = held.get_value();
-            let Ok((m, levels)) = &*mem else { return None };
-            Some(match pick.get()? {
-                MemPick::Node(d, i) => {
-                    let b = levels.get(d)?.get(i)?;
-                    let kind = if d + 1 == levels.len() { "Leaf" } else { "Internal node" };
+            let Ok((m, nodes)) = &*mem else { return None };
+            let i = node.get();
+            let n = nodes.get(i)?;
+            let kind = if n.leaf { "Leaf" } else if n.parent.is_none() { "Root" } else { "Internal node" };
+            let hidden = n.slabs.len().saturating_sub(SLABS_SHOWN);
+            let slabs = n
+                .slabs
+                .clone()
+                .take(SLABS_SHOWN)
+                .map(|k| {
+                    let s = &m.slabs[k].debug;
                     view! {
-                        <div class="mem-detail">
-                            <b>{format!("{kind} · level {d} · slabs {}..{}", b.slabs.start, b.slabs.end)}</b>
-                            <ul class="mono">{b.entries.iter().map(|e| view! { <li>{e.clone()}</li> }).collect_view()}</ul>
-                        </div>
+                        <button class="mem-slab" class:sel=move || slab.get() == Some(k)
+                            title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
+                            on:click=move |_| slab.set(Some(k))>{k}</button>
                     }
-                    .into_any()
-                }
-                MemPick::Slab(i) => {
-                    let s = m.slabs.get(i)?;
-                    let d = &s.debug;
-                    let segs: Vec<String> = s.runs.iter().map(segment_label).collect();
-                    view! {
-                        <div class="mem-detail">
-                            <b>{format!("Slab {i} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
-                            <div class="dim mono">{format!("tail {} · weight {}", d.tail, d.weight)}</div>
-                            <div class="mem-line"><span class="dim">"bytes"</span><code>{slice_hex(&d.bytes)}</code></div>
-                            <div class="mem-line"><span class="dim">"segments"</span><code>{segs.join(" , ")}</code></div>
-                            {(!s.realized.is_empty()).then(|| view! {
-                                <div class="mem-line"><span class="dim">"realized"</span><code>{s.realized.join(" , ")}</code></div>
-                            })}
-                        </div>
-                    }
-                    .into_any()
-                }
+                })
+                .collect_view();
+            let slab_detail = slab.get().and_then(|k| {
+                let s = m.slabs.get(k)?;
+                let d = &s.debug;
+                let segs: Vec<String> = s.runs.iter().map(segment_label).collect();
+                Some(view! {
+                    <div class="mem-slab-detail">
+                        <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
+                        <div class="dim mono">{format!("tail {} · weight {}", d.tail, d.weight)}</div>
+                        <div class="mem-line"><span class="dim">"bytes"</span><code>{slice_hex(&d.bytes)}</code></div>
+                        <div class="mem-line"><span class="dim">"segments"</span><code>{segs.join(" , ")}</code></div>
+                        {(!s.realized.is_empty()).then(|| view! {
+                            <div class="mem-line"><span class="dim">"realized"</span><code>{s.realized.join(" , ")}</code></div>
+                        })}
+                    </div>
+                })
+            });
+            Some(view! {
+                <div class="mem-detail">
+                    <b>{format!("{kind} · depth {} · slabs {}..{}", n.depth, n.slabs.start, n.slabs.end)}</b>
+                    <ul class="mono">{n.entries.iter().map(|e| view! { <li>{e.clone()}</li> }).collect_view()}</ul>
+                    <div class="mem-slabs">
+                        {slabs}
+                        {(hidden > 0).then(|| view! { <span class="dim">{format!("+{hidden} more slabs; pick a lower node to see them")}</span> })}
+                    </div>
+                    {slab_detail}
+                </div>
             })
         };
         Some(view! {
             <div class="mem">
                 <div class="mem-head">
                     <b class="mono">{m.type_name}</b>
-                    <span class="dim">{format!("{} slabs · {} index levels", n, levels.len())}</span>
-                    <span class="dim">"click a node or a slab"</span>
+                    <span class="dim">{format!("{} slabs · {} nodes · depth {}", m.slabs.len(), nodes.len(), depth + 1)}</span>
+                    <span class="dim">"click a node, then one of its slabs"</span>
                 </div>
                 <div class="mem-scroll">
-                    <div class="mem-tree" style:width=format!("{width}px")>
-                        {rows}
-                        <div class="mem-level slabs">{slabs}</div>
-                    </div>
+                    <svg class="mem-tree" width=width height=height>
+                        {edges}
+                        {boxes}
+                    </svg>
                 </div>
                 {detail}
             </div>
