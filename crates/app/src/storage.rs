@@ -521,8 +521,8 @@ fn ChunkDetail() -> impl IntoView {
         let part = app.part.get()?;
         Some(match part {
             Part::Header => with_chunk(app, |f, c| view! { <ChunkFacts chunk=c.clone() file_len=f.report.len/> }.into_any())?,
-            Part::Changes => view! { <GroupPanel ops=false/><RunPanel/> }.into_any(),
-            Part::Ops => view! { <GroupPanel ops=true/><RunPanel/> }.into_any(),
+            Part::Changes => view! { <GroupPanel ops=false/> }.into_any(),
+            Part::Ops => view! { <GroupPanel ops=true/> }.into_any(),
             Part::Extra => with_chunk(app, |f, c| {
                 let hex: String = extra_ranges(c).map(|r| hex_bytes(&f.bytes[r])).collect();
                 view! {
@@ -684,7 +684,12 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                     }))}
                 </div>
                 {move || match view_of() {
-                    GroupView::Physical => view! { <ColumnStrip ops=ops/> }.into_any(),
+                    GroupView::Physical => view! {
+                        <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
+                            <div class="cols-wrap"><ColumnStrip ops=ops/></div>
+                            <section class="col-detail"><RunPanel/></section>
+                        </div>
+                    }.into_any(),
                     GroupView::Logical => view! { <RowsView ops=ops/> }.into_any(),
                 }}
             </div>
@@ -722,7 +727,9 @@ fn ColumnStrip(ops: bool) -> impl IntoView {
                         );
                         view! {
                             <button class="strip-col" class:sel=move || app.column.get() == Some(me)
-                                on:click=move |_| app.column.set(Some(me)) title=title>
+                                style=format!("--cc: var(--t-{ty}); --b: {}", col.stored_len.max(1))
+                                on:click=move |_| app.column.update(|c| *c = (*c != Some(me)).then_some(me))
+                                title=title>
                                 <span class="strip-bar-area">
                                     <span class="strip-bytes">{fmt::bytes(col.stored_len)}</span>
                                     <span class=format!("strip-bar t-{ty}") style:height=format!("{h}px")></span>

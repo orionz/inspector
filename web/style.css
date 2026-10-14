@@ -383,4 +383,19 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .strip-bar { width: 20px; border-radius: 0 0 3px 3px; }
 .strip-col.sel .strip-bar { outline: 2px solid var(--text); }
 .strip-name { writing-mode: vertical-rl; transform: rotate(180deg); height: 120px; padding-top: 6px; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+.col-view { display: flex; gap: 12px; align-items: flex-start; }
+.cols-wrap { flex: 1 1 0; min-width: 0; transition: flex .3s ease; }
+.col-detail { display: none; flex: 1 1 0; min-width: 0; }
+.col-view.open .col-detail { display: block; }
+.col-view.open .cols-wrap { flex: 0 0 40px; position: sticky; top: 56px; height: calc(100vh - 70px); }
+.col-view.open .col-strip { flex-direction: column; align-items: stretch; height: 100%; gap: 1px; padding: 0; overflow: hidden; }
+.col-view.open .strip-col {
+  width: auto; flex: var(--b) 1 0; min-height: 3px; overflow: hidden; justify-content: center;
+  background: var(--cc); opacity: .5; border-radius: 3px;
+}
+.col-view.open .strip-col:hover { opacity: .8; }
+.col-view.open .strip-col.sel { opacity: 1; outline: 2px solid var(--text); outline-offset: -2px; }
+.col-view.open .strip-bar-area { display: none; }
+.col-view.open .strip-name { height: auto; max-height: 100%; padding: 0; color: #000; font-weight: 600; font-size: 11px; }
+.col-view .runs { margin-bottom: 0; }
 .hex { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 0; }

@@ -35,9 +35,11 @@ The three views sit on folder tabs above the file area.
     object, insert as `t`/`f`, the action and value as one column
     (`makeMap`, `Set "cow"`, `Inc 27`) and pred/succ as comma-separated ids.
     The table runs to the bottom of the window and scrolls with the page
-- Clicking a column opens its runs: repeat / literal / null byte split, every
-  run with its row range, decoded values (deltas shown with their absolute
-  span) and encoded bytes. Raw value columns show bytes per value type.
+- Clicking a column shrinks the columns into a third band (each sized by its
+  bytes) and opens its runs beside it; click another column in the band to
+  switch, or the open one to go back. The runs show the repeat / literal /
+  null byte split, every run with its row range, decoded values (deltas shown
+  with their absolute span) and encoded bytes. Raw value columns show bytes per value type.
 
 **Document tab**
 - The document as a lazy, collapsible tree of its maps, lists and text. Each
