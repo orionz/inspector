@@ -504,7 +504,11 @@ fn ChunkDetail() -> impl IntoView {
                     view! {
                         <button class=format!("part s-{}", part_key(p)) class:sel=move || app.part.get() == Some(p)
                             style:--h=h.to_string()
-                            on:click=move |_| { app.part.set(Some(p)); app.column.set(None); }>
+                            title=move || if app.part.get() == Some(p) { "Back to the chunk's parts" } else { "" }
+                            on:click=move |_| {
+                                app.part.update(|cur| *cur = if *cur == Some(p) { None } else { Some(p) });
+                                app.column.set(None);
+                            }>
                             <span class="part-label">{part_label(c, p)}</span>
                             <span class="part-name">{part_name(p)}</span>
                         </button>
@@ -556,12 +560,6 @@ fn ChunkDetail() -> impl IntoView {
                     <div class=format!("dep-warning k-{}", color_key(c))>{format!("This change {w}.")}</div>
                 })).flatten()}
                 <div class="parts">{blocks}</div>
-                <Show when=move || app.part.get().is_some()>
-                    <button class="stack-close" title="Back to the chunk's parts"
-                        on:click=move |_| { app.part.set(None); app.column.set(None); }>
-                        <span class="stack-back">"‹"</span>
-                    </button>
-                </Show>
             </div>
             <section class="part-detail">{detail}</section>
             <Show when=move || ops_part().is_some()>
@@ -767,12 +765,12 @@ fn RowsView(ops: bool) -> impl IntoView {
         let page = RwSignal::new(0usize);
         let pages = table.rows.div_ceil(ROWS_PAGE);
         let t = StoredValue::new_local(table.clone());
+        let actors = with_chunk(app, |_, c| c.facts.actors.clone()).unwrap_or_default();
         Some(view! {
             {pager(page, pages, table.rows, "rows")}
             <div class="scroll-x">
                 <table class="dense rows mono">
                     <thead><tr>
-                        <th class="num">"#"</th>
                         {table.fields.iter().map(|f| view! { <th>{f.name.clone()}</th> }).collect_view()}
                     </tr></thead>
                     <tbody>
@@ -780,9 +778,8 @@ fn RowsView(ops: bool) -> impl IntoView {
                             let start = page.get() * ROWS_PAGE;
                             (start..(start + ROWS_PAGE).min(t.rows)).map(|r| view! {
                                 <tr>
-                                    <td class="num dim">{r}</td>
                                     {t.fields.iter().map(|f| {
-                                        let v = f.render(r);
+                                        let v = f.render_with(r, &actors);
                                         let title = v.clone();
                                         view! { <td title=title>{v}</td> }
                                     }).collect_view()}

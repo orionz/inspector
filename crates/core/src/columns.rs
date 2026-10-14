@@ -806,7 +806,22 @@ impl Field {
     }
 
     pub fn render(&self, row: usize) -> String {
+        self.render_with(row, &[])
+    }
+
+    /// Like [`Field::render`], but shows ids as `counter@actor` with the
+    /// first four hex digits of the actor from `actors`, and an empty object
+    /// id as `ROOT`.
+    pub fn render_with(&self, row: usize, actors: &[String]) -> String {
         let get = |v: &Vec<Cell>| v.get(row).cloned().unwrap_or(Cell::Null);
+        let id = |a: Cell, c: Cell| {
+            let actor = a
+                .as_u64()
+                .and_then(|i| actors.get(i as usize))
+                .map(|hex| hex.chars().take(4).collect())
+                .unwrap_or_else(|| a.to_string());
+            format!("{c}@{actor}")
+        };
         match &self.data {
             FieldData::Scalar(v) => {
                 let c = get(v);
@@ -825,15 +840,16 @@ impl Field {
                 }
             }
             FieldData::Id { actor, ctr } => match (get(actor), get(ctr)) {
+                (Cell::Null, Cell::Null) if self.name == "obj" => "ROOT".into(),
                 (Cell::Null, Cell::Null) => String::new(),
-                (a, c) => format!("{c}@{a}"),
+                (a, c) => id(a, c),
             },
             FieldData::Key { actor, ctr, string } => match get(string) {
                 Cell::S(s) => truncate(&s, 40),
                 _ => match (get(actor), get(ctr)) {
                     (_, Cell::I(0)) | (_, Cell::U(0)) => "_head".into(),
                     (Cell::Null, Cell::Null) => String::new(),
-                    (a, c) => format!("{c}@{a}"),
+                    (a, c) => id(a, c),
                 },
             },
             FieldData::Value { meta, offsets, raw } => {
@@ -856,7 +872,7 @@ impl Field {
                     return if s == e { String::new() } else { format!("×{}", e - s) };
                 }
                 let shown: Vec<String> = (s..e.min(s + 8))
-                    .map(|k| items[0].render(k))
+                    .map(|k| items[0].render_with(k, actors))
                     .collect();
                 let more = if e - s > 8 {
                     format!(" +{}", e - s - 8)

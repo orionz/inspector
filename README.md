@@ -21,14 +21,17 @@ The three views sit on folder tabs above the file area.
 - Clicking a chunk shows its parts: Header (actor count), Changes and Ops
   (row count and bytes), and Extra when a change carries bytes after its
   columns. Clicking a part opens its detail and shrinks the parts into a
-  second band, so the two bands work as breadcrumbs; clicking a band goes back
-  to that level.
+  second band beside the chunk band. Click another part in that band to switch
+  to it, the open part to go back to the parts, or the chunk band to go back
+  to the stack.
 - Header: facts (actors, heads, deps, seq/time/message, change-set fragment
   prefix counts, checksum) and a byte-layout bar of the whole chunk.
 - Changes and Ops get Physical / Logical tabs on the left edge:
-  - **Physical**: the columns side by side, coloured by type, each as tall as
-    its stored bytes (hover for share of group/file and bytes per row)
-  - **Logical**: the columns recombined into rows (op ids, keys, typed
+  - **Physical**: the columns side by side, coloured by type, hanging from
+    their names with length proportional to stored bytes (hover for share of
+    group/file and bytes per row)
+  - **Logical**: the columns recombined into rows (op ids as `ctr@abcd` with
+    the actor's first four hex digits, `ROOT` for the root object, keys, typed
     values, pred/succ lists)
 - Clicking a column opens its runs: repeat / literal / null byte split, every
   run with its row range, decoded values (deltas shown with their absolute

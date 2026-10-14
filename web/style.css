@@ -357,6 +357,7 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
   height: auto; flex: var(--h) 1 0; padding: 0; justify-content: center; border-left-width: 0; border-radius: 3px;
   background: var(--pc); opacity: .5;
 }
+.chunk-view.open .parts .part:hover { opacity: .8; }
 .chunk-view.open .parts .part.sel { opacity: 1; outline: 2px solid var(--text); outline-offset: -2px; }
 .chunk-view.open .part-label { display: none; }
 .chunk-view.open .part-name { display: block; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 600; color: #000; overflow: hidden; }
@@ -373,11 +374,11 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .side-tabs button:hover { color: var(--text); filter: none; }
 .side-tabs button.active { width: 38px; margin-right: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
 .col-strip { display: flex; gap: 3px; align-items: flex-start; overflow-x: auto; padding: 4px 0 8px; }
-.strip-col { display: flex; flex-direction: column; align-items: center; width: 26px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
+.strip-col { display: flex; flex-direction: column-reverse; justify-content: flex-end; align-items: center; width: 26px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
 .strip-col:hover, .strip-col.sel { background: var(--sel); }
-.strip-bar-area { height: 350px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; width: 100%; }
-.strip-bytes { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10.5px; color: var(--dim); white-space: nowrap; }
-.strip-bar { width: 20px; border-radius: 3px 3px 0 0; }
+.strip-bar-area { height: 350px; display: flex; flex-direction: column-reverse; justify-content: flex-end; align-items: center; gap: 4px; width: 100%; }
+.strip-bytes { writing-mode: vertical-rl; font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+.strip-bar { width: 20px; border-radius: 0 0 3px 3px; }
 .strip-col.sel .strip-bar { outline: 2px solid var(--text); }
-.strip-name { writing-mode: vertical-rl; font-family: var(--mono); font-size: 11.5px; padding-top: 6px; white-space: nowrap; }
+.strip-name { writing-mode: vertical-rl; transform: rotate(180deg); height: 120px; padding-top: 6px; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
 .hex { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 0; }
