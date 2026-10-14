@@ -2,10 +2,9 @@ use std::rc::Rc;
 
 use am_inspect::chunk::{Chunk, DepOrder, SectionKind};
 use am_inspect::columns::{
-    build_rows, decode_runs, value_breakdown, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
+    build_rows, decode_runs, decode_value, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
     RunKind, RowTable,
 };
-use am_inspect::doc::short_hex;
 use am_inspect::format_time;
 use leptos::context::Provider;
 use leptos::prelude::*;
@@ -585,7 +584,7 @@ fn ChunkDetail() -> impl IntoView {
                 <div class="parts">{blocks}</div>
             </div>
             <section class="part-detail">{detail}</section>
-            <Show when=move || ops_part().is_some()>
+            <Show when=move || ops_part().is_some() && app.column.get().is_none()>
                 <nav class="side-tabs">
                     {side_tab(GroupView::Physical, "Physical")}
                     {side_tab(GroupView::Logical, "Logical")}
@@ -839,35 +838,167 @@ fn RowsView(ops: bool) -> impl IntoView {
     }
 }
 
-const RUNS_PAGE: usize = 50;
+const RUNS_PAGE: usize = 100;
+const RAW_HEX_MAX: usize = 48;
 
-fn run_value(col: &ColumnInfo, run: &Run, actors: &[String]) -> String {
-    let fmt_cell = |c: &Cell| -> String {
-        match (col.col_type(), c) {
-            (ColType::ValueMetadata, Cell::U(v)) => format!("{}·{}", value_type_name(v & 0xf), v >> 4),
-            (ColType::Actor, Cell::U(v)) => {
-                let a = actors.get(*v as usize).map(|s| short_hex(s)).unwrap_or("?");
-                format!("{v}({a})")
-            }
-            (ColType::DeltaInteger, Cell::I(v)) => format!("{v:+}"),
-            (ColType::String, Cell::S(s)) => format!("{:?}", fmt::short(s, 40)),
-            (_, c) => c.to_string(),
+fn fmt_cell(col: &ColumnInfo, c: &Cell, actors: &[String]) -> String {
+    match (col.col_type(), c) {
+        (ColType::ValueMetadata, Cell::U(v)) => format!("{}·{}", value_type_name(v & 0xf), v >> 4),
+        (ColType::Actor, Cell::U(v)) => {
+            let a = actors.get(*v as usize).map(|s| fmt::short(s, 4)).unwrap_or_else(|| "?".into());
+            format!("{v} ({a})")
         }
-    };
-    let mut s = match run.kind {
-        RunKind::Null => "null".to_string(),
-        RunKind::Repeat | RunKind::Bool => fmt_cell(&run.values[0]),
-        RunKind::Literal => {
-            let shown: Vec<String> = run.values.iter().take(12).map(fmt_cell).collect();
-            let more = run.values.len().saturating_sub(12);
-            format!("{}{}", shown.join(" "), if more > 0 { format!(" …+{more}") } else { String::new() })
-        }
-        RunKind::Raw => String::new(),
-    };
-    if let Some((a, b)) = run.delta_span {
-        s.push_str(&format!("  → {a}..{b}"));
+        (ColType::DeltaInteger, Cell::I(v)) => format!("{v:+}"),
+        (ColType::String, Cell::S(s)) => format!("{:?}", fmt::short(s, 40)),
+        (_, c) => c.to_string(),
+    }
+}
+
+fn hex_spaced(b: &[u8]) -> String {
+    let mut s: String = b.iter().take(RAW_HEX_MAX).map(|x| format!("{x:02x} ")).collect();
+    if b.len() > RAW_HEX_MAX {
+        s.push('…');
     }
     s
+}
+
+/// One cell of a run table: a whole repeat, null or bool run, one value of a
+/// literal run, or one row's raw value bytes.
+struct RunLine {
+    kind: RunKind,
+    rows: std::ops::Range<usize>,
+    value: String,
+    title: String,
+}
+
+/// A column cut into the lines of its run table, with the row each line starts at.
+enum ColLines {
+    Runs { col: ColumnInfo, runs: DecodedRuns, line_rows: Vec<usize>, run_first_line: Vec<usize> },
+    Raw { col: ColumnInfo, lines: Vec<(std::ops::Range<usize>, std::ops::Range<usize>, u64)>, line_rows: Vec<usize> },
+}
+
+impl ColLines {
+    fn runs(col: ColumnInfo) -> Self {
+        let runs = decode_runs(&col);
+        let mut line_rows = Vec::new();
+        let mut run_first_line = Vec::with_capacity(runs.runs.len());
+        for r in &runs.runs {
+            run_first_line.push(line_rows.len());
+            match r.kind {
+                RunKind::Literal => line_rows.extend(r.first_row..r.first_row + r.values.len()),
+                _ => line_rows.push(r.first_row),
+            }
+        }
+        ColLines::Runs { col, runs, line_rows, run_first_line }
+    }
+
+    /// Raw values split by row, with consecutive empty values merged when one
+    /// metadata run covers them.
+    fn raw(col: ColumnInfo, meta: &DecodedRuns) -> Self {
+        let mut lines = Vec::new();
+        let mut pos = 0;
+        for run in &meta.runs {
+            let code = |v: Option<&Cell>| v.and_then(Cell::as_u64).unwrap_or(0);
+            let mut each = |row: usize, m: u64| {
+                let len = (m >> 4) as usize;
+                lines.push((row..row + 1, pos..pos + len, m & 0xf));
+                pos += len;
+            };
+            match run.kind {
+                RunKind::Literal => run.values.iter().enumerate().for_each(|(i, v)| each(run.first_row + i, code(Some(v)))),
+                _ if code(run.values.first()) >> 4 == 0 => {
+                    lines.push((run.first_row..run.first_row + run.count, pos..pos, code(run.values.first()) & 0xf))
+                }
+                _ => (0..run.count).for_each(|i| each(run.first_row + i, code(run.values.first()))),
+            }
+        }
+        let line_rows = lines.iter().map(|l| l.0.start).collect();
+        ColLines::Raw { col, lines, line_rows }
+    }
+
+    fn col(&self) -> &ColumnInfo {
+        match self {
+            ColLines::Runs { col, .. } | ColLines::Raw { col, .. } => col,
+        }
+    }
+
+    fn line_rows(&self) -> &[usize] {
+        match self {
+            ColLines::Runs { line_rows, .. } | ColLines::Raw { line_rows, .. } => line_rows,
+        }
+    }
+
+    fn rows(&self) -> usize {
+        match self {
+            ColLines::Runs { runs, .. } => runs.stats.rows,
+            ColLines::Raw { lines, .. } => lines.last().map_or(0, |l| l.0.end),
+        }
+    }
+
+    /// The lines overlapping `rows`.
+    fn lines(&self, rows: std::ops::Range<usize>, actors: &[String]) -> Vec<RunLine> {
+        let first = self.line_rows().partition_point(|&r| r <= rows.start).saturating_sub(1);
+        let last = self.line_rows().partition_point(|&r| r < rows.end);
+        let mut out = Vec::with_capacity(last.saturating_sub(first));
+        match self {
+            ColLines::Raw { col, lines, .. } => {
+                for (r, b, code) in &lines[first..last.min(lines.len())] {
+                    let bytes = col.data.get(b.clone()).unwrap_or_default();
+                    out.push(RunLine {
+                        kind: RunKind::Raw,
+                        rows: r.clone(),
+                        value: hex_spaced(bytes),
+                        title: format!("{} · {} bytes", decode_value(*code, bytes), b.len()),
+                    });
+                }
+            }
+            ColLines::Runs { col, runs, run_first_line, .. } => {
+                let mut i = run_first_line.partition_point(|&l| l <= first).saturating_sub(1);
+                while i < runs.runs.len() && run_first_line[i] < last {
+                    let run = &runs.runs[i];
+                    let skip = first.saturating_sub(run_first_line[i]);
+                    run_lines(col, run, actors, skip, last - run_first_line[i], &mut out);
+                    i += 1;
+                }
+            }
+        }
+        out
+    }
+}
+
+fn run_lines(col: &ColumnInfo, run: &Run, actors: &[String], skip: usize, until: usize, out: &mut Vec<RunLine>) {
+    let rows = run.first_row..run.first_row + run.count;
+    let encoded = |b: &std::ops::Range<usize>| format!("{} bytes: {}", b.len(), hex_spaced(&col.data[b.clone()]));
+    if run.kind != RunKind::Literal {
+        let value = match (run.kind, run.values.first(), run.delta_span) {
+            (RunKind::Null, ..) => format!("{} × null", run.count),
+            (_, Some(v), Some((a, b))) => format!("{} × {}  → {a}..{b}", run.count, fmt_cell(col, v, actors)),
+            (_, Some(v), None) => format!("{} × {}", run.count, fmt_cell(col, v, actors)),
+            _ => String::new(),
+        };
+        let title = format!("{} run · rows {}..{} · {}", run.kind.label(), rows.start, rows.end, encoded(&run.bytes));
+        out.push(RunLine { kind: run.kind, rows, value, title });
+        return;
+    }
+    let mut abs = run.delta_span.map(|(first, _)| first);
+    for (i, v) in run.values.iter().enumerate().take(until) {
+        if i > 0 {
+            if let (Some(a), Cell::I(d)) = (abs.as_mut(), v) {
+                *a = a.wrapping_add(*d);
+            }
+        }
+        if i < skip {
+            continue;
+        }
+        let start = if i == 0 { run.bytes.start } else { run.value_starts[i] };
+        let end = run.value_starts.get(i + 1).copied().unwrap_or(run.bytes.end);
+        let value = match abs {
+            Some(a) => format!("{a}  ({})", fmt_cell(col, v, actors)),
+            None => fmt_cell(col, v, actors),
+        };
+        let title = format!("literal · row {} · {}", run.first_row + i, encoded(&(start..end)));
+        out.push(RunLine { kind: run.kind, rows: run.first_row + i..run.first_row + i + 1, value, title });
+    }
 }
 
 /// Whether two columns encode the same field, e.g. an op id's actor and
@@ -876,127 +1007,154 @@ fn same_field(a: &ColumnInfo, b: &ColumnInfo) -> bool {
     a.spec.id() == b.spec.id() && (a.col_type() == ColType::String) == (b.col_type() == ColType::String)
 }
 
-/// The runs of every column sharing the selected column's id, one card over another.
-#[component]
-fn RunPanel() -> impl IntoView {
-    let app = expect_context::<AppState>();
-    move || {
-        let sel = app.column.get()?;
-        let span = with_chunk(app, |_, c| {
-            let cols = &c.group(sel.ops)?.columns;
-            let first = cols.get(sel.index)?;
-            Some(sel.index..sel.index + cols[sel.index..].iter().take_while(|c| same_field(first, c)).count())
-        })
-        .flatten()?;
-        Some(span.map(|index| view! { <RunCard col_ref=ColumnRef { ops: sel.ops, index }/> }).collect_view())
+fn col_order(c: &ColumnInfo) -> u8 {
+    match c.col_type() {
+        ColType::Group => 0,
+        ColType::DeltaInteger | ColType::Integer => 1,
+        ColType::Actor => 2,
+        _ => 3,
     }
 }
 
+/// The selected field's columns: a summary of each, then their runs side by
+/// side, every run one cell spanning the rows it covers.
 #[component]
-fn RunCard(col_ref: ColumnRef) -> impl IntoView {
+fn RunPanel() -> impl IntoView {
     let app = expect_context::<AppState>();
-    let cache: Cache<(usize, usize, ColumnRef), DecodedRuns> = Cache::new();
+    let cache: Cache<(usize, usize, ColumnRef), Vec<ColLines>> = Cache::new();
     move || {
-        let (col, runs, actors, by_type) = with_chunk(app, |f, c| {
-            let group = c.group(col_ref.ops)?;
-            let col = group.columns.get(col_ref.index)?.clone();
-            let runs = cache.get((file_key(f), c.index, col_ref), || decode_runs(&col));
-            let by_type = (col.col_type() == ColType::Value)
-                .then(|| {
-                    group.columns.iter().find(|m| {
-                        m.spec.id() == col.spec.id() && m.col_type() == ColType::ValueMetadata
-                    })
-                })
-                .flatten()
-                .map(value_breakdown)
-                .unwrap_or_default();
-            Some((col, runs, c.facts.actors.clone(), by_type))
+        let sel = app.column.get()?;
+        let (cols, actors) = with_chunk(app, |f, c| {
+            let all = &c.group(sel.ops)?.columns;
+            let first = all.get(sel.index)?;
+            let n = all[sel.index..].iter().take_while(|c| same_field(first, c)).count();
+            let cols = cache.get((file_key(f), c.index, sel), || {
+                let mut picked: Vec<ColumnInfo> = all[sel.index..sel.index + n].to_vec();
+                picked.sort_by_key(col_order);
+                let mut out: Vec<ColLines> = Vec::new();
+                for col in picked {
+                    if col.col_type() == ColType::Value {
+                        let meta = out.iter().find_map(|l| match l {
+                            ColLines::Runs { col, runs, .. } if col.col_type() == ColType::ValueMetadata => Some(runs.clone()),
+                            _ => None,
+                        });
+                        out.push(ColLines::raw(col, &meta.unwrap_or(DecodedRuns { runs: vec![], stats: Default::default(), error: None })));
+                    } else {
+                        out.push(ColLines::runs(col));
+                    }
+                }
+                out
+            });
+            Some((cols, c.facts.actors.clone()))
         })
         .flatten()?;
-        let s = runs.stats.clone();
-        let len = col.data.len().max(1);
-        let page = RwSignal::new(0usize);
-        let n = runs.runs.len();
-        let raw = col.col_type() == ColType::Value;
-        let data = col.data.clone();
-        let split = [
-            ("repeat", s.repeat_bytes, s.repeat_rows),
-            ("literal", s.literal_bytes, s.literal_rows),
-            ("null", s.null_bytes, s.null_rows),
-        ];
+        let (counts, items): (Vec<usize>, Vec<usize>) =
+            (0..cols.len()).partition(|&i| cols[i].col().col_type() == ColType::Group);
         Some(view! {
             <div class="card runs">
-                <div class="card-title">
-                    <b class="mono">{col.name.clone()}</b>
-                    <span class=format!("tchip t-{}", col.col_type().short())>{col.col_type().short()}</span>
-                    <span>{format!("{} stored", fmt::bytes(col.stored_len))}</span>
-                    {col.deflated().then(|| view! { <span class="dim">{format!("{} inflated ({:.1}× deflate)", fmt::bytes(col.data.len()), col.data.len() as f64 / col.stored_len.max(1) as f64)}</span> })}
-                    {(!raw).then(|| view! {
-                        <span>{format!("{} rows", fmt::count(s.rows))}</span>
-                        <span>{format!("{} runs", fmt::count(s.runs))}</span>
-                        <span class="dim">{format!("{} rows/run", fmt::per_row(s.rows, s.runs))}</span>
-                    })}
-                    <span class="spacer"></span>
-                    {(app.column.get_untracked().is_some_and(|c| c.index == col_ref.index)).then(|| view! {
-                        <button class="link" on:click=move |_| app.column.set(None)>"close ✕"</button>
-                    })}
-                </div>
-                {runs.error.clone().map(|e| view! { <div class="error">{e}</div> })}
-                {(!raw).then(|| view! {
-                    <div class="split">
-                        {split.iter().filter(|(_, b, _)| *b > 0).map(|(k, b, r)| view! {
-                            <div class=format!("seg r-{k}") style:flex-grow=b.to_string()
-                                title=format!("{k}: {} bytes for {} rows", b, r)>
-                                {format!("{k} {} · {} rows", fmt::pct(*b, len), fmt::pct(*r, s.rows))}
-                            </div>
-                        }).collect_view()}
-                    </div>
-                })}
-                {if raw {
-                    view! {
-                        <p class="dim">"Raw value bytes, concatenated; row boundaries and types come from the matching value.meta column."</p>
-                        <table class="dense breakdown">
-                            <thead><tr><th>"value type"</th><th class="num">"rows"</th><th class="num">"raw bytes"</th><th class="bar-col">"share"</th><th class="num">"B/row"</th></tr></thead>
-                            <tbody>
-                                {by_type.iter().map(|(t, rows, b)| view! {
-                                    <tr>
-                                        <td class="mono">{*t}</td>
-                                        <td class="num">{fmt::count(*rows)}</td>
-                                        <td class="num">{fmt::bytes(*b)}</td>
-                                        <td class="bar-col"><div class="bar"><div class="fill t-raw" style:width=format!("{}%", fmt::ratio(*b, len))></div></div></td>
-                                        <td class="num dim">{fmt::per_row(*b, *rows)}</td>
-                                    </tr>
-                                }).collect_view()}
-                            </tbody>
-                        </table>
-                        <pre class="hex">{fmt::hex_preview(&data, 384)}</pre>
-                    }.into_any()
-                } else {
-                    let runs = StoredValue::new_local(runs.clone());
-                    view! {
-                        {pager(page, n.div_ceil(RUNS_PAGE), n, "runs")}
-                        <div class="table-wrap"><table class="dense mono runs-table">
-                            <thead><tr><th class="num">"#"</th><th>"kind"</th><th class="num">"rows"</th><th class="num">"×"</th><th class="num">"bytes"</th><th>"value"</th><th>"encoded"</th></tr></thead>
-                            <tbody>
-                                {move || runs.with_value(|runs| {
-                                    let start = page.get() * RUNS_PAGE;
-                                    runs.runs[start..(start + RUNS_PAGE).min(n)].iter().enumerate().map(|(k, r)| view! {
-                                        <tr>
-                                            <td class="num dim">{start + k}</td>
-                                            <td><span class=format!("rchip r-{}", r.kind.label())>{r.kind.label()}</span></td>
-                                            <td class="num dim">{format!("{}..{}", r.first_row, r.first_row + r.count)}</td>
-                                            <td class="num">{r.count}</td>
-                                            <td class="num">{r.bytes.len()}</td>
-                                            <td class="val">{run_value(&col, r, &actors)}</td>
-                                            <td class="dim hexcell">{fmt::hex_preview(&data[r.bytes.clone()], 12)}</td>
-                                        </tr>
-                                    }).collect_view()
-                                })}
-                            </tbody>
-                        </table></div>
-                    }.into_any()
-                }}
+                {cols.iter().enumerate().map(|(i, l)| col_summary(app, l, i == 0)).collect_view()}
+                {[counts, items].into_iter().filter(|s| !s.is_empty()).map(|set| {
+                    view! { <RunTable cols=cols.clone() set=set actors=actors.clone()/> }
+                }).collect_view()}
             </div>
         })
+    }
+}
+
+fn col_summary(app: AppState, lines: &ColLines, close: bool) -> impl IntoView {
+    let col = lines.col();
+    let ty = col.col_type().short();
+    let stats = match lines {
+        ColLines::Runs { runs, .. } => Some(runs.stats.clone()),
+        ColLines::Raw { .. } => None,
+    };
+    let error = match lines {
+        ColLines::Runs { runs, .. } => runs.error.clone(),
+        ColLines::Raw { .. } => None,
+    };
+    let len = col.data.len().max(1);
+    view! {
+        <div class="card-title">
+            <b class="mono">{col.name.clone()}</b>
+            <span class=format!("tchip t-{ty}")>{ty}</span>
+            <span>{format!("{} stored", fmt::bytes(col.stored_len))}</span>
+            {col.deflated().then(|| view! { <span class="dim">{format!("{} inflated ({:.1}× deflate)", fmt::bytes(col.data.len()), col.data.len() as f64 / col.stored_len.max(1) as f64)}</span> })}
+            {stats.clone().map(|s| view! {
+                <span>{format!("{} rows", fmt::count(s.rows))}</span>
+                <span>{format!("{} runs", fmt::count(s.runs))}</span>
+                <span class="dim">{format!("{} rows/run", fmt::per_row(s.rows, s.runs))}</span>
+            })}
+            <span class="spacer"></span>
+            {close.then(|| view! { <button class="link" on:click=move |_| app.column.set(None)>"close ✕"</button> })}
+        </div>
+        {error.map(|e| view! { <div class="error">{e}</div> })}
+        {stats.map(|s| {
+            let split = [
+                ("repeat", s.repeat_bytes, s.repeat_rows),
+                ("literal", s.literal_bytes, s.literal_rows),
+                ("null", s.null_bytes, s.null_rows),
+            ];
+            view! {
+                <div class="split">
+                    {split.into_iter().filter(|(_, b, _)| *b > 0).map(|(k, b, r)| view! {
+                        <div class=format!("seg r-{k}") style:flex-grow=b.to_string()
+                            title=format!("{k}: {b} bytes for {r} rows")>
+                            {format!("{k} {} · {} rows", fmt::pct(b, len), fmt::pct(r, s.rows))}
+                        </div>
+                    }).collect_view()}
+                </div>
+            }
+        })}
+    }
+}
+
+/// Columns that share row numbers, side by side: the first column splits the
+/// rows wherever any of their runs starts.
+#[component]
+fn RunTable(cols: Rc<Vec<ColLines>>, set: Vec<usize>, actors: Vec<String>) -> impl IntoView {
+    let total = set.iter().map(|&i| cols[i].rows()).max().unwrap_or(0);
+    let mut bounds: Vec<usize> = set.iter().flat_map(|&i| cols[i].line_rows().iter().copied()).collect();
+    bounds.push(total);
+    bounds.sort_unstable();
+    bounds.dedup();
+    let segments = bounds.len().saturating_sub(1);
+    let page = RwSignal::new(0usize);
+    let bounds = StoredValue::new(bounds);
+    let cols = StoredValue::new_local(cols);
+    let heads: Vec<String> = set.iter().map(|&i| cols.with_value(|c| c[i].col().name.clone())).collect();
+    let body = move || {
+        let p = page.get();
+        let (s0, s1) = (p * RUNS_PAGE, ((p + 1) * RUNS_PAGE).min(segments));
+        let segs: Vec<std::ops::Range<usize>> = bounds.with_value(|b| (s0..s1).map(|k| b[k]..b[k + 1]).collect());
+        let Some(rows) = segs.first().zip(segs.last()).map(|(a, b)| a.start..b.end) else {
+            return vec![];
+        };
+        let mut grid: Vec<Vec<Option<(RunLine, usize)>>> = (0..segs.len()).map(|_| set.iter().map(|_| None).collect()).collect();
+        cols.with_value(|cols| {
+            for (c, &i) in set.iter().enumerate() {
+                for line in cols[i].lines(rows.clone(), &actors) {
+                    let from = segs.partition_point(|s| s.end <= line.rows.start);
+                    let to = segs.partition_point(|s| s.start < line.rows.end);
+                    if from < to {
+                        grid[from][c] = Some((line, to - from));
+                    }
+                }
+            }
+        });
+        grid.into_iter().zip(segs).map(|(cells, seg)| view! {
+            <tr>
+                <td class="num dim seg">{if seg.len() == 1 { seg.start.to_string() } else { format!("{}..{}", seg.start, seg.end) }}</td>
+                {cells.into_iter().flatten().map(|(l, span)| view! {
+                    <td class=format!("val rk-{}", l.kind.label()) rowspan=span title=l.title>{l.value}</td>
+                }).collect_view()}
+            </tr>
+        }).collect::<Vec<_>>()
+    };
+    view! {
+        {pager(page, segments.div_ceil(RUNS_PAGE), segments, "row ranges")}
+        <table class="dense mono runs-table">
+            <thead><tr><th class="num">"rows"</th>{heads.into_iter().map(|h| view! { <th>{h}</th> }).collect_view()}</tr></thead>
+            <tbody>{body}</tbody>
+        </table>
     }
 }

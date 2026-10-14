@@ -325,6 +325,8 @@ pub struct Run {
     pub bytes: std::ops::Range<usize>,
     /// The raw values as stored (deltas for delta columns).
     pub values: Vec<Cell>,
+    /// For literal runs, where each value starts within the column.
+    pub value_starts: Vec<usize>,
     /// Absolute values of the first and last row for delta columns.
     pub delta_span: Option<(i64, i64)>,
 }
@@ -377,6 +379,7 @@ pub fn decode_runs(col: &ColumnInfo) -> DecodedRuns {
                 first_row: 0,
                 bytes: 0..data.len(),
                 values: vec![],
+                value_starts: vec![],
                 delta_span: None,
             });
         }
@@ -396,6 +399,7 @@ pub fn decode_runs(col: &ColumnInfo) -> DecodedRuns {
                         first_row: row,
                         bytes: pos..pos + n,
                         values: vec![Cell::B(value)],
+                        value_starts: vec![],
                         delta_span: None,
                     });
                     stats.repeat_rows += count as usize;
@@ -418,6 +422,7 @@ pub fn decode_runs(col: &ColumnInfo) -> DecodedRuns {
                     break;
                 };
                 pos += n;
+                let mut value_starts = Vec::new();
                 let (kind, rows, values) = if count > 0 {
                     let Some((v, n)) = rle_value(ty, &data[pos..]) else {
                         error = Some(format!("bad value at column byte {pos}"));
@@ -428,7 +433,9 @@ pub fn decode_runs(col: &ColumnInfo) -> DecodedRuns {
                 } else if count < 0 {
                     let k = count.unsigned_abs() as usize;
                     let mut vals = Vec::with_capacity(k.min(4096));
+                    value_starts.reserve(k.min(4096));
                     for _ in 0..k {
+                        value_starts.push(pos);
                         let Some((v, n)) = rle_value(ty, &data[pos..]) else {
                             error = Some(format!("bad value at column byte {pos}"));
                             break;
@@ -494,6 +501,7 @@ pub fn decode_runs(col: &ColumnInfo) -> DecodedRuns {
                     first_row: row,
                     bytes: start..pos,
                     values,
+                    value_starts,
                     delta_span,
                 });
                 row += rows;

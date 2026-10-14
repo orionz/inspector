@@ -31,14 +31,6 @@ pub fn pct(part: usize, whole: usize) -> String {
     }
 }
 
-pub fn ratio(part: usize, whole: usize) -> f64 {
-    if whole == 0 {
-        0.0
-    } else {
-        part as f64 * 100.0 / whole as f64
-    }
-}
-
 pub fn per_row(bytes: usize, rows: usize) -> String {
     if rows == 0 {
         "–".into()
@@ -49,19 +41,6 @@ pub fn per_row(bytes: usize, rows: usize) -> String {
 
 pub fn short(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
-}
-
-pub fn hex_preview(b: &[u8], max: usize) -> String {
-    let mut s: String = b
-        .iter()
-        .take(max)
-        .map(|x| format!("{x:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if b.len() > max {
-        s.push_str(" …");
-    }
-    s
 }
 
 /// `n` with thousands separators, e.g. `12,345`.

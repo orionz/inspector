@@ -290,7 +290,13 @@ table.ops td { max-width: 30ch; }
 .runs .split .seg { min-width: 4px; color: #10131a; font-size: 11px; font-weight: 600; padding: 0 6px; line-height: 20px; white-space: nowrap; overflow: hidden; }
 .runs .table-wrap { max-height: 420px; overflow: auto; }
 .runs-table td.val { max-width: 60ch; }
-.runs-table td.hexcell { max-width: 30ch; }
+.runs-table td.val { border-left: 3px solid transparent; vertical-align: top; border-right: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+.runs-table td.rk-repeat { border-left-color: var(--r-repeat); }
+.runs-table td.rk-literal { border-left-color: var(--r-literal); }
+.runs-table td.rk-null { border-left-color: var(--r-null); color: var(--dim); }
+.runs-table td.rk-bool { border-left-color: var(--r-bool); }
+.runs-table td.rk-raw { border-left-color: var(--r-raw); }
+.runs-table td.seg { vertical-align: top; }
 pre.hex { white-space: pre-wrap; word-break: break-all; background: var(--panel-2); padding: 8px; border-radius: 6px; margin: 0; }
 
 /* ---- document tab ---- */

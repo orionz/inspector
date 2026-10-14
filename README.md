@@ -37,12 +37,16 @@ The three views sit on folder tabs above the file area.
     The table runs to the bottom of the window and scrolls with the page
 - Columns that encode one field (`obj.actor` + `obj.ctr`, `key.actor` +
   `key.ctr`, `value.meta` + `value.raw`, …) highlight and open together;
-  `key.str` stands alone. Clicking one shrinks the
-  columns into a third band (each sized by its bytes) and opens their runs
-  beside it, one over the other; click another column in the band to
-  switch, or the open one to go back. The runs show the repeat / literal /
-  null byte split, every run with its row range, decoded values (deltas shown
-  with their absolute span) and encoded bytes. Raw value columns show bytes per value type.
+  `key.str` stands alone. Clicking one shrinks the columns into a third band
+  (each sized by its bytes), hides the Physical / Logical tabs, and opens the
+  field's runs beside it; click another column in the band to switch, or the
+  open one to go back.
+- The runs view gives each column's repeat / literal / null byte split, then
+  one table: row ranges first, split wherever any column's run changes, and a
+  column per encoded column where each run is one cell spanning its rows
+  (`604 × 2`, `7 × null`, or one cell per literal value; deltas show their
+  absolute values). `value.raw` shows each row's bytes in hex beside its
+  metadata. Hover a cell for its encoded bytes.
 
 **Document tab**
 - The document as a lazy, collapsible tree of its maps, lists and text. Each
