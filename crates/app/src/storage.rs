@@ -443,7 +443,7 @@ fn ChunkStack() -> impl IntoView {
 }
 
 fn parts(c: &Chunk) -> Vec<Part> {
-    let mut parts = vec![Part::Header];
+    let mut parts = vec![];
     if c.group(false).is_some() {
         parts.push(Part::Changes);
     }
@@ -465,7 +465,6 @@ fn extra_ranges(c: &Chunk) -> impl Iterator<Item = std::ops::Range<usize>> + '_ 
 
 fn part_key(p: Part) -> &'static str {
     match p {
-        Part::Header => "header",
         Part::Changes => "changecols",
         Part::Ops => "opcols",
         Part::Extra => "suffix",
@@ -474,7 +473,6 @@ fn part_key(p: Part) -> &'static str {
 
 fn part_name(p: Part) -> &'static str {
     match p {
-        Part::Header => "Header",
         Part::Changes => "Changes",
         Part::Ops => "Ops",
         Part::Extra => "Extra",
@@ -484,7 +482,6 @@ fn part_name(p: Part) -> &'static str {
 fn part_bytes(c: &Chunk, p: Part) -> usize {
     let group = |ops: bool| c.group(ops).map_or(0, |g| g.stored_len());
     match p {
-        Part::Header => c.len() - group(false) - group(true) - part_bytes(c, Part::Extra),
         Part::Changes => group(false),
         Part::Ops => group(true),
         Part::Extra => extra_ranges(c).map(|r| r.len()).sum(),
@@ -494,10 +491,6 @@ fn part_bytes(c: &Chunk, p: Part) -> usize {
 fn part_label(c: &Chunk, p: Part) -> AnyView {
     let rows = |ops: bool| c.group(ops).map_or(0, |g| g.rows);
     match p {
-        Part::Header => {
-            let n = c.facts.actors.len();
-            view! { "Header: " <b>{fmt::count_exact(n)}</b> {if n == 1 { " actor" } else { " actors" }} }.into_any()
-        }
         Part::Changes => view! { "Changes (" <b>{fmt::count_exact(rows(false))}</b> "): " {fmt::bytes(part_bytes(c, p))} }.into_any(),
         Part::Ops => view! { "Ops (" <b>{fmt::count_exact(rows(true))}</b> "): " {fmt::bytes(part_bytes(c, p))} }.into_any(),
         Part::Extra => view! { "Extra: " {fmt::bytes(part_bytes(c, p))} }.into_any(),
@@ -542,7 +535,6 @@ fn ChunkDetail() -> impl IntoView {
     let detail = move || {
         let part = app.part.get()?;
         Some(match part {
-            Part::Header => with_chunk(app, |f, c| view! { <ChunkFacts chunk=c.clone() file_len=f.report.len/> }.into_any())?,
             Part::Changes => view! { <GroupPanel ops=false/> }.into_any(),
             Part::Ops => view! { <GroupPanel ops=true/> }.into_any(),
             Part::Extra => with_chunk(app, |f, c| {
@@ -578,9 +570,9 @@ fn ChunkDetail() -> impl IntoView {
     view! {
         <div class="chunk-view" class:open=move || app.part.get().is_some()>
             <div class="parts-wrap">
-                {move || with_chunk(app, |_, c| dep_warning(c).map(|w| view! {
-                    <div class=format!("dep-warning k-{}", color_key(c))>{format!("This change {w}.")}</div>
-                })).flatten()}
+                <div class="chunk-facts">
+                    {move || with_chunk(app, |f, c| view! { <ChunkFacts chunk=c.clone() file_len=f.report.len/> })}
+                </div>
                 <div class="parts">{blocks}</div>
             </div>
             <section class="part-detail">{detail}</section>

@@ -18,15 +18,15 @@ The three views sit on folder tabs above the file area.
   behind it. Changes whose dependencies
   only appear later in the file are orange; changes with a dependency missing
   from the file entirely (so they can't apply) are red.
-- Clicking a chunk shows its parts: Header (actor count), Changes and Ops
+- Clicking a chunk shows its header facts (actors, heads, deps,
+  seq/time/message, change-set fragment prefix counts, checksum) with a
+  byte-layout bar of the whole chunk, and its parts below: Changes and Ops
   (row count and bytes), and Extra when a change carries bytes after its
   columns. Clicking a part opens its detail and shrinks the parts into a
   second band beside the chunk band. In any band, click another chunk, part
   or column to switch to it, or the open one to go back one level; clicking a
   band of small chunks goes back to the stack.
-- Header: facts (actors, heads, deps, seq/time/message, change-set fragment
-  prefix counts, checksum) and a byte-layout bar of the whole chunk.
-- Changes and Ops get Physical / Logical tabs on the left edge:
+- Changes and Ops get Physical / Logical tabs on the right edge:
   - **Physical**: the columns side by side, coloured by type, hanging from
     their names with length proportional to stored bytes (hover for share of
     group/file and bytes per row)

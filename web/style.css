@@ -354,7 +354,7 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .part-detail { display: none; flex: 1 1 0; min-width: 0; }
 .chunk-view.open .part-detail { display: block; }
 .chunk-view.open .parts-wrap { flex: 0 0 40px; position: sticky; top: 56px; height: calc(100vh - 70px); }
-.chunk-view.open .dep-warning { display: none; }
+.chunk-view.open .chunk-facts { display: none; }
 .chunk-view.open .parts { height: 100%; gap: 1px; }
 .chunk-view.open .parts .part {
   height: auto; flex: var(--h) 1 0; padding: 0; justify-content: center; border-left-width: 0; border-radius: 3px;
@@ -367,15 +367,15 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .part-detail > .card + .card, .part-detail > .card + .runs { margin-top: 12px; }
 
 /* ---- physical / logical ---- */
-.side-tabs { position: absolute; left: -36px; top: 80px; display: flex; flex-direction: column; gap: 4px; }
+.side-tabs { position: absolute; right: -36px; top: 80px; display: flex; flex-direction: column; gap: 4px; }
 .side-tabs button {
-  width: 36px; padding: 16px 0; border: 2px solid #000; border-right: 0; border-radius: 10px 0 0 10px;
+  width: 36px; padding: 16px 0; border: 2px solid #000; border-left: 0; border-radius: 0 10px 10px 0;
   background: color-mix(in srgb, var(--tc) 30%, var(--panel)); color: var(--dim);
   font-weight: 600; font-size: 13px; cursor: pointer; filter: brightness(.85);
 }
-.side-tabs button span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); }
+.side-tabs button span { display: inline-block; writing-mode: vertical-rl; }
 .side-tabs button:hover { color: var(--text); filter: none; }
-.side-tabs button.active { width: 38px; margin-right: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
+.side-tabs button.active { width: 38px; margin-left: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
 .col-strip { display: flex; gap: 8px; align-items: flex-start; overflow-x: auto; padding: 4px 0 8px; }
 .strip-col { display: flex; flex-direction: column-reverse; justify-content: flex-end; align-items: center; width: 26px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
 .strip-group { display: flex; gap: 3px; align-items: flex-start; border-radius: 5px; cursor: pointer; }

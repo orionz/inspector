@@ -27,7 +27,6 @@ pub enum GroupView {
 /// A part of the selected chunk that can be opened on its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Part {
-    Header,
     Changes,
     Ops,
     Extra,
