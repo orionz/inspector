@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use am_inspect::chunk::{Chunk, ChunkKind, DepOrder};
+use am_inspect::chunk::{Chunk, DepOrder};
 use am_inspect::columns::{
     build_rows, decode_runs, value_breakdown, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
     RunKind, RowTable,
@@ -125,7 +125,6 @@ fn tiny_chunks(chunks: &[Chunk], file_len: usize) -> Vec<bool> {
 
 struct StackLayout {
     items: Vec<StackItem>,
-    log: bool,
 }
 
 fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
@@ -155,24 +154,7 @@ fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
             _ => items.push(StackItem::Bands { first: c.index, last: c.index }),
         }
     }
-    StackLayout { items, log }
-}
-
-#[component]
-fn ScaleNote() -> impl IntoView {
-    let app = expect_context::<AppState>();
-    move || {
-        app.file.with(|f| {
-            let f = f.as_ref()?;
-            let log = stack_layout(&f.report.chunks, f.report.len.max(1)).log;
-            Some(view! {
-                <p class="dim small scale-note">
-                    {if log { "Block heights use a log scale of chunk size." } else { "Block heights are proportional to chunk size." }}
-                    " Chunks around 1% of the file or less are drawn as thin bands, one per chunk. Hover for details, click to open."
-                </p>
-            })
-        })
-    }
+    StackLayout { items }
 }
 
 fn select_chunk(app: AppState, index: usize) {
@@ -413,10 +395,6 @@ fn ChunkStack() -> impl IntoView {
     };
     view! {
         <div class="stack-wrap">
-            <div class="stack-head">
-                <TypeSummary/>
-                <ScaleNote/>
-            </div>
             <div class="stack" node_ref=stack_el
                 on:mousemove=track
                 on:mouseleave=move |_| hovered.set(None)
@@ -442,45 +420,6 @@ fn ChunkStack() -> impl IntoView {
                 </button>
             </Show>
         </div>
-    }
-}
-
-#[component]
-fn TypeSummary() -> impl IntoView {
-    let app = expect_context::<AppState>();
-    move || {
-        app.file.with(|f| {
-            let f = f.as_ref()?;
-            let mut rows: Vec<(ChunkKind, usize, usize, usize, usize)> = vec![];
-            for c in &f.report.chunks {
-                match rows.iter_mut().find(|r| r.0 == c.kind) {
-                    Some(r) => {
-                        r.1 += 1;
-                        r.2 += c.len();
-                        r.3 += c.num_changes();
-                        r.4 += c.num_ops();
-                    }
-                    None => rows.push((c.kind, 1, c.len(), c.num_changes(), c.num_ops())),
-                }
-            }
-            let total = f.report.len;
-            Some(view! {
-                <table class="dense summary">
-                    <thead><tr><th>"type"</th><th>"#"</th><th>"bytes"</th><th>"changes"</th><th>"ops"</th></tr></thead>
-                    <tbody>
-                        {rows.into_iter().map(|(k, n, b, ch, ops)| view! {
-                            <tr>
-                                <td><span class=format!("chip k-{}", k.key())>{k.label()}</span></td>
-                                <td class="num">{n}</td>
-                                <td class="num" title=fmt::pct(b, total)>{fmt::bytes(b)}</td>
-                                <td class="num">{fmt::count(ch)}</td>
-                                <td class="num">{fmt::count(ops)}</td>
-                            </tr>
-                        }).collect_view()}
-                    </tbody>
-                </table>
-            })
-        })
     }
 }
 

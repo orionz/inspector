@@ -160,19 +160,20 @@ fn Welcome() -> impl IntoView {
 fn Folder() -> impl IntoView {
     let app = expect_context::<AppState>();
     let tabs = [
-        (Tab::Load, "Load", "The file as loaded"),
-        (Tab::Document, "Document", "The document's objects, maps and text"),
-        (Tab::Save, "Save", "What doc.save() writes for this document"),
+        (Tab::Load, "t-load", "Load", "The file as loaded"),
+        (Tab::Document, "t-doc", "Document", "The document's objects, maps and text"),
+        (Tab::Save, "t-save", "Save", "What doc.save() writes for this document"),
     ];
+    let color = move || tabs.iter().find(|t| t.0 == app.tab.get()).map_or("", |t| t.1);
     view! {
         <div class="folder">
             <nav class="folder-tabs">
-                {tabs.map(|(tab, label, title)| view! {
-                    <button class:active=move || app.tab.get() == tab title=title
+                {tabs.map(|(tab, color, label, title)| view! {
+                    <button class=color class:active=move || app.tab.get() == tab title=title
                         on:click=move |_| app.tab.set(tab)>{label}</button>
                 })}
             </nav>
-            <div class="folder-body">
+            <div class=move || format!("folder-body {}", color())>
                 {move || match app.tab.get() {
                     Tab::Load => view! { <storage::StorageTab/> }.into_any(),
                     Tab::Document => view! { <document::DocumentTab/> }.into_any(),
