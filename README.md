@@ -56,8 +56,8 @@ The three views sit on folder tabs above the file area.
   value shows the author/actor and time of the op that set it.
 
 **Save tab**
-- The Load tab's view of what `doc.save()` writes after loading the file, with
-  its size against the original. Changes that couldn't be applied are written
+- The Load tab's view of what `doc.save()` writes after loading the file
+  (its size is in the stats tab). Changes that couldn't be applied are written
   after the document, so they show up here too.
 
 ## Layout

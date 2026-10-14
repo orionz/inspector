@@ -46,22 +46,14 @@ pub fn SaveTab() -> impl IntoView {
     let (chunk, part, column, group_view) = app.saved_sel;
     let saved = AppState { file: app.saved, chunk, part, column, group_view, ..app };
     let note = move || {
-        let original = app.file.with(|f| f.as_ref().map(|f| f.bytes.len()))?;
-        let saved = app.saved.with(|f| f.as_ref().map(|f| f.bytes.len()));
+        if app.saved.with(|f| f.is_some()) {
+            return None;
+        }
         let failed = app.model.with(|m| m.as_deref().is_some_and(|m| m.is_err()));
-        Some(match saved {
-            Some(n) => format!(
-                "What doc.save() writes after loading this file: {} ({} of the original {}).",
-                fmt::bytes(n),
-                fmt::pct(n, original.max(1)),
-                fmt::bytes(original)
-            ),
-            None if failed => "The file didn't load as a document, so there's nothing to save.".into(),
-            None => "Loading the document…".into(),
-        })
+        Some(if failed { "The file didn't load as a document, so there's nothing to save." } else { "Loading the document…" })
     };
     view! {
-        <p class="dim save-note">{note}</p>
+        {move || note().map(|n| view! { <p class="dim save-note">{n}</p> })}
         <Provider value=saved>
             {move || app.saved.with(|f| f.is_some()).then(|| view! { <StorageTab/> })}
         </Provider>
