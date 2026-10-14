@@ -19,20 +19,17 @@ The three views sit on folder tabs above the file area.
   only appear later in the file are orange; changes with a dependency missing
   from the file entirely (so they can't apply) are red.
 - Clicking a chunk shows its parts: Header (actor count), Changes and Ops
-  (row count and bytes). Clicking a part opens its detail and shrinks the parts
-  into a second band, so the two bands work as breadcrumbs; clicking a band
-  goes back to that level.
-- For the selected chunk: header facts (actors, heads, deps, seq/time/message,
-  change-set fragment prefix counts, checksum), and a byte-layout bar splitting
-  the chunk into header, metadata, column metadata, change columns, op
-  columns and suffix.
-- The change-metadata and op-set column groups, each viewable as
-  - **columns**: every hexane column with its stored size, deflate ratio,
-    share of the group and of the file, and bytes per row
-  - **rows**: the columns recombined into logical rows (op ids, keys, typed
+  (row count and bytes), and Extra when a change carries bytes after its
+  columns. Clicking a part opens its detail and shrinks the parts into a
+  second band, so the two bands work as breadcrumbs; clicking a band goes back
+  to that level.
+- Header: facts (actors, heads, deps, seq/time/message, change-set fragment
+  prefix counts, checksum) and a byte-layout bar of the whole chunk.
+- Changes and Ops get Physical / Logical tabs on the left edge:
+  - **Physical**: the columns side by side, coloured by type, each as tall as
+    its stored bytes (hover for share of group/file and bytes per row)
+  - **Logical**: the columns recombined into rows (op ids, keys, typed
     values, pred/succ lists)
-  - **changes** (op set only): the chunk's changes as decoded by automerge,
-    each expandable to its ops
 - Clicking a column opens its runs: repeat / literal / null byte split, every
   run with its row range, decoded values (deltas shown with their absolute
   span) and encoded bytes. Raw value columns show bytes per value type.

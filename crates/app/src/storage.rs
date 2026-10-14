@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use am_inspect::chunk::{Chunk, DepOrder};
+use am_inspect::chunk::{Chunk, DepOrder, SectionKind};
 use am_inspect::columns::{
     build_rows, decode_runs, value_breakdown, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
     RunKind, RowTable,
 };
-use am_inspect::doc::{decode_change, short_hex};
-use am_inspect::{chunk_changes, format_time};
+use am_inspect::doc::short_hex;
+use am_inspect::format_time;
 use leptos::context::Provider;
 use leptos::prelude::*;
 
@@ -432,7 +432,17 @@ fn parts(c: &Chunk) -> Vec<Part> {
     if c.group(true).is_some() {
         parts.push(Part::Ops);
     }
+    if part_bytes(c, Part::Extra) > 0 {
+        parts.push(Part::Extra);
+    }
     parts
+}
+
+fn extra_ranges(c: &Chunk) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    c.sections
+        .iter()
+        .filter(|s| s.kind == SectionKind::Suffix && s.label != "head indexes")
+        .map(|s| s.range.clone())
 }
 
 fn part_key(p: Part) -> &'static str {
@@ -440,6 +450,7 @@ fn part_key(p: Part) -> &'static str {
         Part::Header => "header",
         Part::Changes => "changecols",
         Part::Ops => "opcols",
+        Part::Extra => "suffix",
     }
 }
 
@@ -448,15 +459,17 @@ fn part_name(p: Part) -> &'static str {
         Part::Header => "Header",
         Part::Changes => "Changes",
         Part::Ops => "Ops",
+        Part::Extra => "Extra",
     }
 }
 
 fn part_bytes(c: &Chunk, p: Part) -> usize {
     let group = |ops: bool| c.group(ops).map_or(0, |g| g.stored_len());
     match p {
-        Part::Header => c.len() - group(false) - group(true),
+        Part::Header => c.len() - group(false) - group(true) - part_bytes(c, Part::Extra),
         Part::Changes => group(false),
         Part::Ops => group(true),
+        Part::Extra => extra_ranges(c).map(|r| r.len()).sum(),
     }
 }
 
@@ -469,6 +482,7 @@ fn part_label(c: &Chunk, p: Part) -> AnyView {
         }
         Part::Changes => view! { "Changes (" <b>{fmt::count_exact(rows(false))}</b> "): " {fmt::bytes(part_bytes(c, p))} }.into_any(),
         Part::Ops => view! { "Ops (" <b>{fmt::count_exact(rows(true))}</b> "): " {fmt::bytes(part_bytes(c, p))} }.into_any(),
+        Part::Extra => view! { "Extra: " {fmt::bytes(part_bytes(c, p))} }.into_any(),
     }
 }
 
@@ -505,7 +519,35 @@ fn ChunkDetail() -> impl IntoView {
             Part::Header => with_chunk(app, |f, c| view! { <ChunkFacts chunk=c.clone() file_len=f.report.len/> }.into_any())?,
             Part::Changes => view! { <GroupPanel ops=false/><RunPanel/> }.into_any(),
             Part::Ops => view! { <GroupPanel ops=true/><RunPanel/> }.into_any(),
+            Part::Extra => with_chunk(app, |f, c| {
+                let hex: String = extra_ranges(c).map(|r| hex_bytes(&f.bytes[r])).collect();
+                view! {
+                    <div class="card">
+                        <div class="card-title"><b>"Extra bytes"</b><span class="dim">"after the columns, not read by automerge"</span></div>
+                        <pre class="hex">{hex}</pre>
+                    </div>
+                }
+                .into_any()
+            })?,
         })
+    };
+    let ops_part = move || match app.part.get() {
+        Some(Part::Changes) => Some(false),
+        Some(Part::Ops) => Some(true),
+        _ => None,
+    };
+    let side_tab = move |v: GroupView, label: &'static str| {
+        let active = move || {
+            let (a, b) = app.group_view.get();
+            ops_part().is_some_and(|ops| if ops { b == v } else { a == v })
+        };
+        view! {
+            <button class:active=active on:click=move |_| {
+                let ops = ops_part().unwrap_or(false);
+                app.group_view.update(|g| if ops { g.1 = v } else { g.0 = v });
+                app.column.set(None);
+            }><span>{label}</span></button>
+        }
     };
     view! {
         <div class="chunk-view" class:open=move || app.part.get().is_some()>
@@ -522,6 +564,12 @@ fn ChunkDetail() -> impl IntoView {
                 </Show>
             </div>
             <section class="part-detail">{detail}</section>
+            <Show when=move || ops_part().is_some()>
+                <nav class="side-tabs">
+                    {side_tab(GroupView::Physical, "Physical")}
+                    {side_tab(GroupView::Logical, "Logical")}
+                </nav>
+            </Show>
         </div>
     }
 }
@@ -616,14 +664,8 @@ fn GroupPanel(ops: bool) -> impl IntoView {
             a
         }
     };
-    let set_view = move |v: GroupView| {
-        app.group_view.update(|g| if ops { g.1 = v } else { g.0 = v });
-    };
     let has_group = move || with_chunk(app, |_, c| c.group(ops).is_some()).unwrap_or(false);
     let title = if ops { "Op set" } else { "Change metadata" };
-    let tab = move |v: GroupView, label: &'static str| {
-        view! { <button class:active=move || view_of() == v on:click=move |_| set_view(v)>{label}</button> }
-    };
     view! {
         <Show when=has_group fallback=move || (!ops).then(|| view! {
             <div class="card group empty">
@@ -642,69 +684,56 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                         })}
                         <span class="dim">{format!("+{} B col meta", g.meta_len)}</span>
                     }))}
-                    <span class="spacer"></span>
-                    <nav class="seg-tabs">
-                        {tab(GroupView::Columns, "columns")}
-                        {tab(GroupView::Rows, "rows")}
-                        {ops.then(|| tab(GroupView::Changes, "changes"))}
-                    </nav>
                 </div>
                 {move || match view_of() {
-                    GroupView::Columns => view! { <ColumnTable ops=ops/> }.into_any(),
-                    GroupView::Rows => view! { <RowsView ops=ops/> }.into_any(),
-                    GroupView::Changes => view! { <ChangesView/> }.into_any(),
+                    GroupView::Physical => view! { <ColumnStrip ops=ops/> }.into_any(),
+                    GroupView::Logical => view! { <RowsView ops=ops/> }.into_any(),
                 }}
             </div>
         </Show>
     }
 }
 
+const STRIP_H: f64 = 320.0;
+
+/// The group's columns side by side, each as tall as its stored bytes.
 #[component]
-fn ColumnTable(ops: bool) -> impl IntoView {
+fn ColumnStrip(ops: bool) -> impl IntoView {
     let app = expect_context::<AppState>();
     move || {
         with_chunk(app, |f, c| {
             let g = c.group(ops)?;
             let file_len = f.report.len;
             let total = g.stored_len().max(1);
-            let max = g.columns.iter().map(|c| c.stored_len.max(c.data.len())).max().unwrap_or(1);
+            let max = g.columns.iter().map(|c| c.stored_len).max().unwrap_or(1).max(1);
             let rows = g.rows;
             Some(view! {
-                <table class="dense cols">
-                    <thead><tr>
-                        <th>"column"</th><th>"type"</th><th class="num">"bytes"</th><th class="bar-col">"size"</th>
-                        <th class="num">"%grp"</th><th class="num">"%file"</th><th class="num">"B/row"</th>
-                    </tr></thead>
-                    <tbody>
-                        {g.columns.iter().enumerate().map(|(index, col)| {
-                            let me = ColumnRef { ops, index };
-                            let stored = fmt::ratio(col.stored_len, max);
-                            let inflated = fmt::ratio(col.data.len(), max);
-                            let title = format!(
-                                "spec {:#x} · id {} · {}{}",
-                                col.spec.0, col.spec.id(), col.col_type(),
-                                if col.deflated() { format!(" · deflated from {}", fmt::bytes(col.data.len())) } else { String::new() }
-                            );
-                            view! {
-                                <tr class="click" class:sel=move || app.column.get() == Some(me)
-                                    on:click=move |_| app.column.set(Some(me)) title=title>
-                                    <td class="mono">{col.name.clone()}{col.deflated().then(|| view! { <span class="z" title="deflated">"z"</span> })}</td>
-                                    <td><span class=format!("tchip t-{}", col.col_type().short())>{col.col_type().short()}</span></td>
-                                    <td class="num">{fmt::bytes(col.stored_len)}</td>
-                                    <td class="bar-col">
-                                        <div class="bar">
-                                            {col.deflated().then(|| view! { <div class="ghost" style:width=format!("{inflated}%")></div> })}
-                                            <div class=format!("fill t-{}", col.col_type().short()) style:width=format!("{stored}%")></div>
-                                        </div>
-                                    </td>
-                                    <td class="num">{fmt::pct(col.stored_len, total)}</td>
-                                    <td class="num dim">{fmt::pct(col.stored_len, file_len)}</td>
-                                    <td class="num dim">{fmt::per_row(col.stored_len, rows)}</td>
-                                </tr>
-                            }
-                        }).collect_view()}
-                    </tbody>
-                </table>
+                <div class="col-strip">
+                    {g.columns.iter().enumerate().map(|(index, col)| {
+                        let me = ColumnRef { ops, index };
+                        let ty = col.col_type().short();
+                        let h = (STRIP_H * col.stored_len as f64 / max as f64).max(2.0);
+                        let title = format!(
+                            "{} · {ty}\n{} · {} of group · {} of file · {} B/row{}",
+                            col.name,
+                            fmt::bytes(col.stored_len),
+                            fmt::pct(col.stored_len, total),
+                            fmt::pct(col.stored_len, file_len),
+                            fmt::per_row(col.stored_len, rows),
+                            if col.deflated() { format!("\ndeflated from {}", fmt::bytes(col.data.len())) } else { String::new() }
+                        );
+                        view! {
+                            <button class="strip-col" class:sel=move || app.column.get() == Some(me)
+                                on:click=move |_| app.column.set(Some(me)) title=title>
+                                <span class="strip-bar-area">
+                                    <span class="strip-bytes">{fmt::bytes(col.stored_len)}</span>
+                                    <span class=format!("strip-bar t-{ty}") style:height=format!("{h}px")></span>
+                                </span>
+                                <span class="strip-name">{col.name.clone()}{col.deflated().then(|| " z")}</span>
+                            </button>
+                        }
+                    }).collect_view()}
+                </div>
             })
         })
         .flatten()
@@ -764,84 +793,6 @@ fn RowsView(ops: bool) -> impl IntoView {
                 </table>
             </div>
         })
-    }
-}
-
-const CHANGES_PAGE: usize = 25;
-
-#[component]
-fn ChangesView() -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let cache: Cache<(usize, usize), Result<Vec<automerge::Change>, String>> = Cache::new();
-    move || {
-        let changes = with_chunk(app, |f, c| {
-            cache.get((file_key(f), c.index), || chunk_changes(&f.bytes, c))
-        })?;
-        let n = match &*changes {
-            Ok(list) => list.len(),
-            Err(e) => return Some(view! { <div class="error">{e.clone()}</div> }.into_any()),
-        };
-        let changes = StoredValue::new_local(changes);
-        let list = move |i: usize| {
-            changes.with_value(|c| match &**c {
-                Ok(list) => list[i].clone(),
-                Err(_) => unreachable!("checked above"),
-            })
-        };
-        let page = RwSignal::new(0usize);
-        let open = RwSignal::new(None::<usize>);
-        Some(view! {
-            {pager(page, n.div_ceil(CHANGES_PAGE), n, "changes")}
-            <div class="changes">
-                {move || {
-                    let start = page.get() * CHANGES_PAGE;
-                    (start..(start + CHANGES_PAGE).min(n)).map(move |i| {
-                        let ch = list(i);
-                        let author = ch.author().map(|a| am_inspect::doc::author_label(a.as_bytes()));
-                        let actor = ch.actor_id().to_hex_string();
-                        view! {
-                            <div class="change">
-                                <button class="change-row" class:sel=move || open.get() == Some(i)
-                                    on:click=move |_| open.update(|o| *o = if *o == Some(i) { None } else { Some(i) })>
-                                    <span class="mono">{format!("{}@{}", ch.seq(), short_hex(&actor))}</span>
-                                    <span class="author">{author.unwrap_or_default()}</span>
-                                    <span class="dim">{format_time(ch.timestamp())}</span>
-                                    <span class="num">{format!("{} ops", ch.len())}</span>
-                                    <span class="msg">{ch.message().map(|m| m.to_string()).unwrap_or_default()}</span>
-                                    <span class="mono dim">{fmt::short(&ch.hash().to_string(), 8)}</span>
-                                </button>
-                                {move || (open.get() == Some(i)).then(|| {
-                                    let d = decode_change(&list(i));
-                                    view! {
-                                        <div class="change-body">
-                                            <div class="facts">
-                                                {fact("hash", view! { <span class="mono">{d.hash.clone()}</span> })}
-                                                {fact("actor", view! { <span class="mono">{d.actor.clone()}</span> })}
-                                                {fact("start op", d.start_op)}
-                                                {fact("deps", hash_list(&d.deps))}
-                                                {fact("extra", fmt::bytes(d.extra_bytes))}
-                                            </div>
-                                            <table class="dense mono ops">
-                                                <thead><tr><th>"id"</th><th>"action"</th><th>"obj"</th><th>"key"</th><th>"ins"</th><th>"pred"</th></tr></thead>
-                                                <tbody>
-                                                    {d.ops.iter().take(500).map(|o| view! {
-                                                        <tr>
-                                                            <td>{o.id.clone()}</td><td>{o.action.clone()}</td><td>{o.obj.clone()}</td>
-                                                            <td>{o.key.clone()}</td><td>{if o.insert { "✓" } else { "" }}</td><td>{o.pred.clone()}</td>
-                                                        </tr>
-                                                    }).collect_view()}
-                                                </tbody>
-                                            </table>
-                                            {(d.ops.len() > 500).then(|| view! { <p class="dim">{format!("… {} more ops", d.ops.len() - 500)}</p> })}
-                                        </div>
-                                    }
-                                })}
-                            </div>
-                        }
-                    }).collect_view()
-                }}
-            </div>
-        }.into_any())
     }
 }
 

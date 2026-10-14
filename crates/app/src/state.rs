@@ -20,9 +20,8 @@ pub enum Tab {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GroupView {
-    Columns,
-    Rows,
-    Changes,
+    Physical,
+    Logical,
 }
 
 /// A part of the selected chunk that can be opened on its own.
@@ -31,6 +30,7 @@ pub enum Part {
     Header,
     Changes,
     Ops,
+    Extra,
 }
 
 /// Which column group of the selected chunk: change metadata or ops.
@@ -78,7 +78,7 @@ impl AppState {
                 RwSignal::new(None),
                 RwSignal::new(None),
                 RwSignal::new(None),
-                RwSignal::new((GroupView::Columns, GroupView::Columns)),
+                RwSignal::new((GroupView::Physical, GroupView::Physical)),
             ),
             model: RwSignal::new_local(None),
             status: RwSignal::new(None),
@@ -86,7 +86,7 @@ impl AppState {
             chunk: RwSignal::new(None),
             part: RwSignal::new(None),
             column: RwSignal::new(None),
-            group_view: RwSignal::new((GroupView::Columns, GroupView::Columns)),
+            group_view: RwSignal::new((GroupView::Physical, GroupView::Physical)),
             step: RwSignal::new(0),
             heads: RwSignal::new(None),
         };
@@ -133,7 +133,7 @@ impl AppState {
                 self.saved_sel.1.set(None);
                 self.saved_sel.2.set(None);
                 self.group_view
-                    .set((GroupView::Columns, GroupView::Columns));
+                    .set((GroupView::Physical, GroupView::Physical));
                 self.model.set(None);
                 self.saved.set(None);
                 self.load_ms.0.set(None);

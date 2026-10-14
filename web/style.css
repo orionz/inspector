@@ -101,7 +101,7 @@ header.top {
 .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; }
 .link:hover { text-decoration: underline; }
 .status { padding: 6px 16px; background: var(--sel); border-bottom: 1px solid var(--line); }
-main { flex: 1; display: flex; flex-direction: column; padding: 12px 16px 0; }
+main { flex: 1; display: flex; flex-direction: column; padding: 12px 44px 0; }
 .open-file { margin-left: auto; }
 .folder { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 1240px; margin: 0 auto; }
 .t-load { --tc: #5b8cff; } .t-doc { --tc: #2fb38a; } .t-save { --tc: #e8963a; }
@@ -118,10 +118,11 @@ main { flex: 1; display: flex; flex-direction: column; padding: 12px 16px 0; }
 .folder-tabs button.active { background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; margin-bottom: -2px; padding-bottom: 8px; }
 .folder-stats {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: var(--panel-2); font-family: "Courier New", Courier, var(--mono); font-size: 13.5px; cursor: default; user-select: text;
+  background: var(--panel-2); font-family: "Courier New", Courier, var(--mono); font-size: 14px; font-weight: 700;
+  color: var(--text); cursor: default; user-select: text;
 }
 .folder-body {
-  flex: 1; padding: 22px; background: color-mix(in srgb, var(--tc) 14%, var(--panel));
+  position: relative; flex: 1; padding: 22px; background: color-mix(in srgb, var(--tc) 14%, var(--panel));
   border: 2px solid #000; border-bottom: 0; border-radius: 10px 10px 0 0;
 }
 
@@ -360,3 +361,23 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .chunk-view.open .part-label { display: none; }
 .chunk-view.open .part-name { display: block; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 600; color: #000; overflow: hidden; }
 .part-detail > .card + .card, .part-detail > .card + .runs { margin-top: 12px; }
+
+/* ---- physical / logical ---- */
+.side-tabs { position: absolute; left: -36px; top: 80px; display: flex; flex-direction: column; gap: 4px; }
+.side-tabs button {
+  width: 36px; padding: 16px 0; border: 2px solid #000; border-right: 0; border-radius: 10px 0 0 10px;
+  background: color-mix(in srgb, var(--tc) 30%, var(--panel)); color: var(--dim);
+  font-weight: 600; font-size: 13px; cursor: pointer; filter: brightness(.85);
+}
+.side-tabs button span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); }
+.side-tabs button:hover { color: var(--text); filter: none; }
+.side-tabs button.active { width: 38px; margin-right: -2px; background: color-mix(in srgb, var(--tc) 14%, var(--panel)); color: var(--text); filter: none; }
+.col-strip { display: flex; gap: 3px; align-items: flex-start; overflow-x: auto; padding: 4px 0 8px; }
+.strip-col { display: flex; flex-direction: column; align-items: center; width: 26px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; }
+.strip-col:hover, .strip-col.sel { background: var(--sel); }
+.strip-bar-area { height: 350px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; width: 100%; }
+.strip-bytes { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+.strip-bar { width: 20px; border-radius: 3px 3px 0 0; }
+.strip-col.sel .strip-bar { outline: 2px solid var(--text); }
+.strip-name { writing-mode: vertical-rl; font-family: var(--mono); font-size: 11.5px; padding-top: 6px; white-space: nowrap; }
+.hex { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 0; }
