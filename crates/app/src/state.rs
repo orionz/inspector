@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use am_inspect::{parse_file, DocModel, FileReport};
-use automerge::{Automerge, ChangeHash, LoadOptions, OnPartialLoad};
+use automerge::{Automerge, ChangeHash, LoadOptions, ObjId, ObjType, OnPartialLoad};
 use leptos::prelude::*;
 
 pub struct Loaded {
@@ -23,6 +23,15 @@ pub enum GroupView {
     Physical,
     Logical,
     Raw,
+}
+
+/// An object opened in the document view, by the key that leads to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Crumb {
+    pub key: String,
+    pub id: ObjId,
+    pub ty: ObjType,
+    pub len: usize,
 }
 
 /// A part of the selected chunk that can be opened on its own.
@@ -66,6 +75,8 @@ pub struct AppState {
     pub group_view: RwSignal<(GroupView, GroupView)>,
     pub step: RwSignal<usize>,
     pub heads: RwSignal<Option<Vec<ChangeHash>>>,
+    /// Objects opened in the document view, from just below the root.
+    pub doc_path: RwSignal<Vec<Crumb>>,
 }
 
 impl AppState {
@@ -89,6 +100,7 @@ impl AppState {
             group_view: RwSignal::new((GroupView::Physical, GroupView::Physical)),
             step: RwSignal::new(0),
             heads: RwSignal::new(None),
+            doc_path: RwSignal::new(Vec::new()),
         };
         Effect::new(move |_| {
             let step = state.step.get();
@@ -112,6 +124,7 @@ impl AppState {
         self.tab.set(Tab::Load);
         self.status.set(None);
         self.model.set(None);
+        self.doc_path.set(Vec::new());
         self.saved.set(None);
         self.load_ms.0.set(None);
         self.load_ms.1.set(None);
@@ -135,6 +148,7 @@ impl AppState {
                 self.group_view
                     .set((GroupView::Physical, GroupView::Physical));
                 self.model.set(None);
+                self.doc_path.set(Vec::new());
                 self.saved.set(None);
                 self.load_ms.0.set(None);
                 self.load_ms.1.set(None);

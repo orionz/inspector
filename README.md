@@ -55,8 +55,13 @@ The three views sit on folder tabs above the file area.
   encoded bytes.
 
 **Document tab**
-- The document as a lazy, collapsible tree of its maps, lists and text. Each
-  value shows the author/actor and time of the op that set it.
+- The document one object at a time, starting at ROOT: a map lists its keys
+  and values, a list wraps its values as `[ v1, v2, … ]`, and text shows its
+  string and marks. Nested objects appear as chips (`{map 12}`,
+  `[list 3]`); clicking one squashes the current pane into a band of its
+  entries at the left and opens the object beside it. In a band, click
+  another object to switch to it, or the open one (or the band) to go back
+  to that level. Hover a value for the change that set it.
 
 **Save tab**
 - The Load tab's view of what `doc.save()` writes after loading the file

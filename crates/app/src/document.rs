@@ -1,10 +1,10 @@
 use am_inspect::doc::{DocModel, Entry, NodeValue};
 use am_inspect::format_time;
-use automerge::{ObjId, ObjType};
+use automerge::{ObjType, ROOT};
 use leptos::prelude::*;
 
 use crate::fmt;
-use crate::state::AppState;
+use crate::state::{AppState, Crumb};
 
 fn with_model<R>(app: AppState, f: impl FnOnce(&DocModel) -> R) -> Option<R> {
     app.model.with(|m| match m.as_deref() {
@@ -30,39 +30,87 @@ pub fn DocumentTab() -> impl IntoView {
                 <div class="card error">"automerge could not load this file: " {e.clone()}</div>
             }
             .into_any(),
-            Some(Ok(_)) => view! {
-                <section class="card tree-card">
-                    <div class="tree">
-                        <ObjectChildren obj=automerge::ROOT ty=ObjType::Map depth=0/>
-                    </div>
-                </section>
-            }
-            .into_any(),
+            Some(Ok(_)) => view! { <DocBrowser/> }.into_any(),
         })
     }
 }
 
-const TREE_PAGE: usize = 100;
+/// One pane per open object, from the root down; every pane but the last
+/// is squashed into a band of its entries.
+#[component]
+fn DocBrowser() -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let levels = move || {
+        let root = Crumb { key: "ROOT".into(), id: ROOT, ty: ObjType::Map, len: 0 };
+        std::iter::once(root).chain(app.doc_path.get()).enumerate().collect::<Vec<_>>()
+    };
+    view! {
+        <div class="doc-view">
+            <For each=levels key=|(level, c)| (*level, format!("{:?}", c.id))
+                children=|(level, c)| view! { <DocLevel level=level crumb=c/> }/>
+        </div>
+    }
+}
+
+const PANE_LIMIT: usize = 500;
+const BAND_STRIPES: usize = 200;
 
 #[component]
-fn ObjectChildren(obj: ObjId, ty: ObjType, depth: usize) -> impl IntoView {
+fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
     let app = expect_context::<AppState>();
-    let limit = RwSignal::new(TREE_PAGE);
-    let is_text = ty == ObjType::Text;
-    move || {
+    let band = move || app.doc_path.with(|p| p.len() > level);
+    let limit = RwSignal::new(PANE_LIMIT);
+    let obj = crumb.id.clone();
+    let ty = crumb.ty;
+    let title = crumb.key.clone();
+    let body = move || {
         let heads = app.heads.get();
         let heads = heads.as_deref();
-        let limit_now = limit.get();
+        if band() {
+            let sel = app.doc_path.with(|p| p.get(level).map(|c| c.key.clone()));
+            return with_model(app, |m| {
+                let page = m.page(&obj, heads, 0, BAND_STRIPES + 1);
+                let stripes = (page.total <= BAND_STRIPES && ty != ObjType::Text).then(|| {
+                    page.entries.into_iter().map(|e| {
+                        let key = if ty == ObjType::List { format!("[{}]", e.key) } else { e.key.clone() };
+                        let is_sel = sel.as_deref() == Some(key.as_str());
+                        let target = match &e.value {
+                            NodeValue::Object { id, ty, len } if !is_sel => Some(Crumb { key: key.clone(), id: id.clone(), ty: *ty, len: *len }),
+                            _ => None,
+                        };
+                        let is_obj = matches!(e.value, NodeValue::Object { .. });
+                        view! {
+                            <div class="doc-stripe" class:obj=is_obj class:sel=is_sel title=key
+                                on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    open_at(app, level, target.clone());
+                                }></div>
+                        }
+                    }).collect_view()
+                });
+                view! {
+                    <div class="doc-band" on:click=move |_| open_at(app, level, None)>
+                        {stripes}
+                        <span class="doc-band-title">{title.clone()}</span>
+                    </div>
+                }
+                .into_any()
+            });
+        }
         with_model(app, |m| {
-            if is_text {
+            let header = |len: usize| view! {
+                <div class="card-title"><b class="mono">{title.clone()}</b><span class="dim">{obj_label(ty, len)}</span></div>
+            };
+            if ty == ObjType::Text {
                 let text = m.text(&obj, heads);
                 let chars = text.chars().count();
                 let marks = m.marks(&obj, heads);
-                let shown: String = text.chars().take(limit_now * 40).collect();
+                let shown: String = text.chars().take(limit.get() * 40).collect();
                 return view! {
-                    <div class="text-obj" style:margin-left=format!("{}em", depth as f64 * 1.1 + 1.2)>
-                        <pre class="text">{shown}{(chars > limit_now * 40).then(|| "…")}</pre>
-                        {(chars > limit_now * 40).then(|| view! {
+                    <div class="card doc-pane">
+                        {header(chars)}
+                        <pre class="text">{shown}{(chars > limit.get() * 40).then(|| "…")}</pre>
+                        {(chars > limit.get() * 40).then(|| view! {
                             <button class="link" on:click=move |_| limit.update(|l| *l *= 4)>{format!("show more of {} chars", fmt::count(chars))}</button>
                         })}
                         {(!marks.is_empty()).then(|| view! {
@@ -75,25 +123,76 @@ fn ObjectChildren(obj: ObjId, ty: ObjType, depth: usize) -> impl IntoView {
                 }
                 .into_any();
             }
-            let page = m.page(&obj, heads, 0, limit_now);
+            let page = m.page(&obj, heads, 0, limit.get());
             let total = page.total;
-            let rows = page
-                .entries
-                .into_iter()
-                .map(|e| view! { <TreeRow entry=e depth=depth/> })
-                .collect_view();
+            let more = (total > limit.get()).then(|| view! {
+                <button class="link more" on:click=move |_| limit.update(|l| *l += PANE_LIMIT)>
+                    {format!("show more ({} of {})", limit.get_untracked(), fmt::count(total))}
+                </button>
+            });
+            let list = matches!(ty, ObjType::List);
+            let entries = if list {
+                let items = page.entries.into_iter().enumerate().map(|(i, e)| view! {
+                    {(i > 0).then(|| view! { <span class="sep">", "</span> })}
+                    <DocValue entry=e level=level in_list=true/>
+                }).collect_view();
+                view! { <div class="doc-list mono"><span class="sep">"[ "</span>{items}<span class="sep">{if total > limit.get() { " … ]" } else { " ]" }}</span></div> }.into_any()
+            } else {
+                let rows = page.entries.into_iter().map(|e| {
+                    let key = e.key.clone();
+                    view! { <div class="doc-key">{key}</div><div class="doc-val"><DocValue entry=e level=level in_list=false/></div> }
+                }).collect_view();
+                view! { <div class="doc-map mono">{rows}</div> }.into_any()
+            };
             view! {
-                {rows}
-                {(total > limit_now).then(|| view! {
-                    <button class="link more" style:margin-left=format!("{}em", depth as f64 * 1.1 + 1.2)
-                        on:click=move |_| limit.update(|l| *l += TREE_PAGE)>
-                        {format!("show more ({} of {})", limit_now, total)}
-                    </button>
-                })}
-                {(total == 0 && depth == 0).then(|| view! { <p class="dim">"(empty)"</p> })}
+                <div class="card doc-pane">
+                    {header(total)}
+                    {entries}
+                    {(total == 0).then(|| view! { <p class="dim">"(empty)"</p> })}
+                    {more}
+                </div>
             }
             .into_any()
         })
+    };
+    view! { <div class="doc-level" class:band=band>{body}</div> }
+}
+
+/// Opens `target` below `level`, or with `None` makes `level` the open pane again.
+fn open_at(app: AppState, level: usize, target: Option<Crumb>) {
+    app.doc_path.update(|p| {
+        p.truncate(level);
+        p.extend(target);
+    });
+    window().scroll_to_with_x_and_y(0.0, 0.0);
+}
+
+/// A value in a pane: scalars in their type's colour, objects as a chip that opens them.
+#[component]
+fn DocValue(entry: Entry, level: usize, in_list: bool) -> impl IntoView {
+    let app = expect_context::<AppState>();
+    let (_, origin) = origin_label(app, entry.origin);
+    let conflict = entry.conflict.then(|| view! { <span class="conflict" title="concurrent values; showing the winner">"⚡"</span> });
+    let title = format!("{origin}\nop {}", entry.op_id);
+    match entry.value {
+        NodeValue::Scalar { text, kind } => view! {
+            <span class=format!("val v-{kind}") title=title>{text}</span>{conflict}
+        }
+        .into_any(),
+        NodeValue::Object { id, ty, len } => {
+            let key = if in_list { format!("[{}]", entry.key) } else { entry.key.clone() };
+            let crumb = Crumb { key, id, ty, len };
+            let sel = {
+                let crumb = crumb.clone();
+                move || app.doc_path.with(|p| p.get(level) == Some(&crumb))
+            };
+            view! {
+                <button class="obj-chip" class:sel=sel title=title
+                    on:click=move |_| open_at(app, level, Some(crumb.clone()))>{obj_label(ty, len)}</button>
+                {conflict}
+            }
+            .into_any()
+        }
     }
 }
 
@@ -125,47 +224,9 @@ fn origin_label(app: AppState, origin: Option<usize>) -> (String, String) {
 
 fn obj_label(ty: ObjType, len: usize) -> String {
     match ty {
-        ObjType::Map => format!("{{map · {len}}}"),
-        ObjType::Table => format!("{{table · {len}}}"),
-        ObjType::List => format!("[list · {len}]"),
-        ObjType::Text => format!("text · {len} chars"),
-    }
-}
-
-#[component]
-fn TreeRow(entry: Entry, depth: usize) -> impl IntoView {
-    let app = expect_context::<AppState>();
-    let small = matches!(entry.value, NodeValue::Object { len, ty, .. } if ty == ObjType::Text || len <= 12);
-    let open = RwSignal::new(depth == 0 && small);
-    let (origin_short, origin_long) = origin_label(app, entry.origin);
-    let indent = format!("{}em", depth as f64 * 1.1);
-    let conflict = entry.conflict.then(|| view! { <span class="conflict" title="concurrent values; showing the winner">"⚡"</span> });
-    let key = entry.key.clone();
-    let op = entry.op_id.clone();
-    match entry.value {
-        NodeValue::Scalar { text, kind } => view! {
-            <div class="row" style:padding-left=indent>
-                <span class="twisty"></span>
-                <span class="key">{key}</span>
-                <span class="sep">":"</span>
-                <span class=format!("val v-{kind}")>{text}</span>
-                <span class="vtype">{kind}</span>
-                {conflict}
-                <span class="origin" title=format!("{origin_long}\nop {op}")>{origin_short}</span>
-            </div>
-        }
-        .into_any(),
-        NodeValue::Object { id, ty, len } => view! {
-            <div class="row obj" style:padding-left=indent on:click=move |_| open.update(|o| *o = !*o)>
-                <span class="twisty">{move || if open.get() { "▾" } else { "▸" }}</span>
-                <span class="key">{key}</span>
-                <span class="sep">":"</span>
-                <span class="objtype">{obj_label(ty, len)}</span>
-                {conflict}
-                <span class="origin" title=format!("{origin_long}\nobject {op}")>{origin_short}</span>
-            </div>
-            {move || open.get().then(|| view! { <ObjectChildren obj=id.clone() ty=ty depth=depth + 1/> })}
-        }
-        .into_any(),
+        ObjType::Map => format!("{{map {len}}}"),
+        ObjType::Table => format!("{{table {len}}}"),
+        ObjType::List => format!("[list {len}]"),
+        ObjType::Text => format!("text {len} chars"),
     }
 }
