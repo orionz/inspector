@@ -489,7 +489,7 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .am-link { color: var(--accent, #3b6ef0); text-decoration: underline; text-underline-offset: 2px; }
 .am-link:hover { text-decoration-thickness: 2px; }
 .fetch-note { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--k-redundant); border-radius: 8px; background: color-mix(in srgb, var(--k-redundant) 12%, var(--panel)); font-size: 13px; }
-.mem-head { display: flex; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+.mem-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; padding-right: 50px; }
 .mem-scroll { overflow-x: auto; padding-bottom: 6px; }
 .mem-tree { display: block; min-width: 100%; }
 .mem-edge { stroke: var(--dim); stroke-width: 1.2; }
@@ -513,3 +513,39 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-arrow { text-align: center; color: var(--dim); font-size: 16px; line-height: 1; margin-top: 6px; }
 .tok.linked { border-radius: 3px; outline: 2px solid transparent; outline-offset: 1px; }
 .tok.hl { outline-color: #f5c400; background: color-mix(in srgb, #f5c400 30%, transparent); }
+
+/* ---- phones ---- */
+@media (max-width: 700px) {
+  header.top { gap: 8px; padding: 8px 10px; }
+  .brand .version { display: none; }
+  main { padding: 8px 6px 0; }
+  .welcome { margin: 16px auto; }
+  .drop-hint { padding: 24px 14px; }
+  .samples li { flex-direction: column; gap: 0; padding: 6px 8px; }
+  .samples .link { min-width: 0; }
+  .folder-tabs { padding: 0 4px; }
+  .folder-tabs button { min-width: 0; flex: 1; padding: 7px 6px 6px; }
+  .folder-stats { display: none; }
+  .folder-body { padding: 10px 8px 76px; }
+  .side-tabs {
+    position: fixed; z-index: 20; left: 8px; right: 8px; top: auto; bottom: 10px;
+    flex-direction: row; justify-content: center; gap: 4px; padding: 4px;
+    border: 2px solid #000; border-radius: 12px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .3);
+  }
+  .side-tabs button, .side-tabs button.active { width: auto; flex: 1; margin: 0; padding: 8px 4px; border: 0; border-radius: 8px; }
+  .side-tabs button span, .side-check span { writing-mode: horizontal-tb; }
+  .side-check { flex-direction: row; width: auto; margin: 0; padding: 0 8px; gap: 4px; border: 0; border-radius: 8px; font-size: 11px; }
+  .storage { gap: 6px; }
+  .storage.open .stack-wrap { flex-basis: 28px; top: 50px; height: calc(100vh - 120px); }
+  .deck-panel { left: -4px; right: -4px; }
+  .stack.touch .deck-panel.current { pointer-events: auto; }
+  .deck-panel.before, .deck-panel.after { left: 0; right: 0; }
+  .chunk-view { gap: 6px; }
+  .groups { grid-template-columns: minmax(0, 1fr); }
+  .card { padding: 8px; }
+  .doc-level.band { flex-basis: 28px; top: 50px; height: calc(100vh - 120px); }
+  .doc-map { grid-template-columns: minmax(0, 38%) minmax(0, 1fr); gap: 3px 10px; }
+  .doc-key { overflow: hidden; text-overflow: ellipsis; }
+  .obj-chip { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+  .scrubber span { min-width: 0; }
+}

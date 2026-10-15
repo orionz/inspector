@@ -303,6 +303,7 @@ fn ChunkStack() -> impl IntoView {
     let rows = StoredValue::new(Vec::<HitRow>::new());
     let cards = StoredValue::new(Vec::<ChunkCard>::new());
     let hovered = RwSignal::new(None::<usize>);
+    let touch = RwSignal::new(false);
     let anchor = RwSignal::new(0.0);
     let zoom_h = RwSignal::new(DECK_MIN_H);
     let on_band = RwSignal::new(false);
@@ -355,25 +356,27 @@ fn ChunkStack() -> impl IntoView {
             )
         })
     };
+    let focus = move |k: usize| {
+        rows.with_value(|rows| {
+            let Some(r) = rows.get(k) else { return };
+            anchor.set((r.top + r.bottom) / 2.0);
+            on_band.set(r.band);
+            zoom_h.set(if r.band { DECK_MIN_H } else { (r.bottom - r.top) * DECK_GROW }.max(DECK_MIN_H));
+        });
+        if hovered.get_untracked() != Some(k) {
+            hovered.set(Some(k));
+        }
+    };
     let track = move |ev: leptos::ev::MouseEvent| {
         if app.chunk.get_untracked().is_some() {
             return;
         }
         let Some(el) = stack_el.get_untracked() else { return };
         let y = ev.client_y() as f64 - el.get_bounding_client_rect().top();
-        rows.with_value(|rows| {
-            if rows.is_empty() {
-                return;
-            }
-            let k = rows.partition_point(|r| r.top <= y).saturating_sub(1);
-            let r = &rows[k];
-            anchor.set((r.top + r.bottom) / 2.0);
-            on_band.set(r.band);
-            zoom_h.set(if r.band { DECK_MIN_H } else { (r.bottom - r.top) * DECK_GROW }.max(DECK_MIN_H));
-            if hovered.get_untracked() != Some(k) {
-                hovered.set(Some(k));
-            }
-        });
+        let k = rows.with_value(|rows| (!rows.is_empty()).then(|| rows.partition_point(|r| r.top <= y).saturating_sub(1)));
+        if let Some(k) = k {
+            focus(k);
+        }
     };
     // Panels are keyed by chunk so each keeps its element, and animates, as
     // it moves between roles.
@@ -396,7 +399,7 @@ fn ChunkStack() -> impl IntoView {
             format!("deck-panel k-{kind} {role}{block}")
         };
         view! {
-            <div class=class>
+            <div class=class data-k=k>
                 <div class="deck-line">
                     <span class="idx">{format!("#{}", card.index)}</span>
                     <span class=format!("chip k-{kind}")>{card.label}</span>
@@ -410,8 +413,10 @@ fn ChunkStack() -> impl IntoView {
     view! {
         <div class="stack-wrap">
             <div class="stack" node_ref=stack_el
-                on:mousemove=track
-                on:mouseleave=move |_| hovered.set(None)
+                class:touch=move || touch.get()
+                on:pointerdown=move |ev: web_sys::PointerEvent| touch.set(ev.pointer_type() != "mouse")
+                on:mousemove=move |ev| if !touch.get_untracked() { track(ev) }
+                on:mouseleave=move |_| if !touch.get_untracked() { hovered.set(None) }
                 on:click=move |ev| {
                     if let Some(open) = app.chunk.get_untracked() {
                         let target = ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok());
@@ -426,7 +431,20 @@ fn ChunkStack() -> impl IntoView {
                         }
                         return;
                     }
-                    track(ev);
+                    let before = hovered.get_untracked();
+                    // On touch there is no hover, so a first tap previews a chunk and a second opens it.
+                    let panel = ev
+                        .target()
+                        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                        .and_then(|t| t.closest(".deck-panel").ok().flatten())
+                        .and_then(|p| p.get_attribute("data-k")?.parse().ok());
+                    match panel {
+                        Some(k) => focus(k),
+                        None => track(ev),
+                    }
+                    if touch.get_untracked() && hovered.get_untracked() != before {
+                        return;
+                    }
                     if let Some(k) = hovered.get_untracked() {
                         hovered.set(None);
                         select_chunk(app, k);

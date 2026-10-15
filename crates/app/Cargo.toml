@@ -26,4 +26,4 @@ subduction_core = { version = "0.19", default-features = false }
 subduction_crypto = { version = "0.10", default-features = false }
 getrandom = { version = "0.2", features = ["js"] }
 bs58 = { version = "0.5", features = ["check"] }
-web-sys = { version = "0.3", features = ["File", "FileList", "Blob", "DragEvent", "DataTransfer", "HtmlInputElement", "Window", "Navigator", "ServiceWorkerContainer", "Location", "Response", "Request", "Element", "DomRect", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "DedicatedWorkerGlobalScope", "WebSocket", "BinaryType", "History"] }
+web-sys = { version = "0.3", features = ["File", "FileList", "Blob", "DragEvent", "DataTransfer", "HtmlInputElement", "Window", "Navigator", "ServiceWorkerContainer", "Location", "Response", "Request", "Element", "DomRect", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "DedicatedWorkerGlobalScope", "WebSocket", "BinaryType", "History", "PointerEvent"] }
