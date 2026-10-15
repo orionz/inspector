@@ -484,12 +484,13 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .col-view.open .strip-bar-area { display: none; }
 .col-view.open .strip-name { height: auto; max-height: 100%; padding: 0; color: #000; font-weight: 600; font-size: 11px; }
 .col-view .runs { margin-bottom: 0; }
+.mem-tabs { margin-left: 52px; }
 .hex { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 0; }
 
 .am-link { color: var(--accent, #3b6ef0); text-decoration: underline; text-underline-offset: 2px; }
 .am-link:hover { text-decoration-thickness: 2px; }
 .fetch-note { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--k-redundant); border-radius: 8px; background: color-mix(in srgb, var(--k-redundant) 12%, var(--panel)); font-size: 13px; }
-.mem-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; padding-right: 50px; }
+.mem-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; padding-right: 64px; }
 .mem-scroll { overflow-x: auto; padding-bottom: 6px; }
 .mem-tree { display: block; min-width: 100%; }
 .mem-edge { stroke: var(--dim); stroke-width: 1.2; }
@@ -510,7 +511,8 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-sec code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
 .mem-segs { --sec: var(--k-change); }
 .mem-realized { --sec: var(--k-compressed); }
-.mem-arrow { text-align: center; color: var(--dim); font-size: 16px; line-height: 1; margin-top: 6px; }
+.mem-arrow { display: block; margin: 6px auto 0; fill: color-mix(in srgb, var(--dim) 75%, var(--panel)); }
+.mem-head b { overflow-wrap: anywhere; }
 .tok.linked { border-radius: 3px; outline: 2px solid transparent; outline-offset: 1px; }
 .tok.hl { outline-color: #f5c400; background: color-mix(in srgb, #f5c400 30%, transparent); }
 
@@ -548,4 +550,6 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
   .doc-key { overflow: hidden; text-overflow: ellipsis; }
   .obj-chip { white-space: normal; text-align: left; overflow-wrap: anywhere; }
   .scrubber span { min-width: 0; }
+  .strip-tabs button { white-space: nowrap; }
+  .mem-tabs { margin-left: 50px; padding: 0 4px; }
 }

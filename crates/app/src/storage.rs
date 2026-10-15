@@ -727,7 +727,7 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                                 {strip_tab(GroupView::Physical, "Cooked")}
                                 {strip_tab(GroupView::Raw, "Raw")}
                             </nav>
-                            <nav class="strip-tabs" class:hidden=move || grouped || app.column.get().is_none_or(|c| c.ops != ops)>
+                            <nav class="strip-tabs mem-tabs" class:hidden=move || grouped || app.column.get().is_none_or(|c| c.ops != ops)>
                                 <button class:active=move || !app.in_memory.get() on:click=move |_| app.in_memory.set(false)>"On Disk"</button>
                                 <button class:active=move || app.in_memory.get() on:click=move |_| app.in_memory.set(true)>"In Memory"</button>
                             </nav>
@@ -1243,9 +1243,9 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                         <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
                         <div class="dim mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
                         {section("mem-bytes", bytes, " ", "[", "]")}
-                        <div class="mem-arrow">"↓"</div>
+                        {down_arrow()}
                         {section("mem-segs", segs, ", ", "[ ", " ]")}
-                        {third.map(|t| view! { <div class="mem-arrow">"↓"</div> {t} })}
+                        {third.map(|t| view! { {down_arrow()} {t} })}
                     </div>
                 })
             });
@@ -1293,7 +1293,6 @@ struct Tok {
 
 /// A slab's bytes, its segments and its realized delta values, cut so that
 /// every literal value, and every other run, has the same ids in all three.
-/// A literal run's header bytes cover all of its values.
 fn slab_tokens(s: &MemorySlab) -> [Vec<Tok>; 3] {
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ");
     let cell = |v: &Cell| match v {
@@ -1311,13 +1310,14 @@ fn slab_tokens(s: &MemorySlab) -> [Vec<Tok>; 3] {
         }
         at = at.max(r.bytes.end);
         let per_value = matches!(r.kind, RunKind::Literal) && !r.values.is_empty() && r.value_starts.len() == r.values.len();
+        if per_value && r.value_starts[0] > r.bytes.start {
+            bytes.push(Tok { text: hex(slice(r.bytes.start..r.value_starts[0])), ids: Some((next, next + 1)) });
+            next += 1;
+        }
         let n = if per_value { r.values.len() } else { 1 };
         let run_ids = Some((next, next + n));
         let realized_run = s.realized.get(k);
         if per_value {
-            if r.value_starts[0] > r.bytes.start {
-                bytes.push(Tok { text: hex(slice(r.bytes.start..r.value_starts[0])), ids: run_ids });
-            }
             for (i, v) in r.values.iter().enumerate() {
                 let ids = Some((next + i, next + i + 1));
                 let end = r.value_starts.get(i + 1).copied().unwrap_or(r.bytes.end);
@@ -1341,6 +1341,14 @@ fn slab_tokens(s: &MemorySlab) -> [Vec<Tok>; 3] {
         bytes.push(Tok { text: hex(&data[at..]), ids: None });
     }
     [bytes, segs, realized]
+}
+
+fn down_arrow() -> impl IntoView {
+    view! {
+        <svg class="mem-arrow" viewBox="0 0 40 30" width="40" height="30" aria-hidden="true">
+            <path d="M11 0 H29 V12 H40 L20 30 L0 12 H11 Z"/>
+        </svg>
+    }
 }
 
 /// A non-literal run as a list reads it, e.g. `5 x10` or `NULL x2`.
