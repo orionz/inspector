@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 
 use crate::fmt;
 use crate::state::{AppState, Cache, ColumnRef, GroupView, Loaded, Part};
-use am_inspect::memory::{column_memory, ColumnMemory, NodeDebug};
+use am_inspect::memory::{column_memory, ColumnMemory, MemoryKind, NodeDebug};
 
 fn with_chunk<R>(app: AppState, f: impl FnOnce(&Rc<Loaded>, &Chunk) -> R) -> Option<R> {
     let idx = app.chunk.get()?;
@@ -1075,7 +1075,7 @@ struct TreeNode {
     parent: Option<usize>,
     /// The slabs under it.
     slabs: std::ops::Range<usize>,
-    /// Its entries, one per line: each child's merged weight, or each slab's weight in a leaf.
+    /// For an internal node, each child's merged weight.
     entries: Vec<String>,
     leaf: bool,
     /// Horizontal centre, in leaf widths.
@@ -1091,7 +1091,6 @@ fn tree_nodes(root: &NodeDebug) -> Vec<TreeNode> {
         out.push(TreeNode { depth, parent, slabs: first..first, entries: vec![], leaf: false, x: 0.0 });
         let x = match node {
             NodeDebug::Leaf { weights } => {
-                out[me].entries = weights.iter().enumerate().map(|(i, w)| format!("slab {}: {w}", first + i)).collect();
                 out[me].leaf = true;
                 *slab += weights.len();
                 *leaf_x += 1.0;
@@ -1101,7 +1100,7 @@ fn tree_nodes(root: &NodeDebug) -> Vec<TreeNode> {
                 out[me].entries = children
                     .iter()
                     .enumerate()
-                    .map(|(i, (agg, n, _))| format!("child {i}: {n} slabs · {agg}"))
+                    .map(|(i, (agg, _, _))| format!("child {i}: {}", bare_agg(agg)))
                     .collect();
                 let xs: Vec<f64> = children.iter().map(|(_, _, c)| walk(c, depth + 1, Some(me), slab, leaf_x, out)).collect();
                 (xs.first().copied().unwrap_or(0.0) + xs.last().copied().unwrap_or(0.0)) / 2.0
@@ -1170,11 +1169,12 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             .map(|(i, n)| {
                 let (x, y) = pos(n);
                 let w = if n.leaf { NODE_W.min(leaf_w - 2.0) } else { NODE_W };
-                let label = (w >= 24.0).then(|| n.slabs.len().to_string());
+                let own = if n.leaf { n.slabs.len() } else { 0 };
+                let label = (w >= 24.0).then(|| own.to_string());
                 view! {
                     <g class="mem-node" class:sel=move || node.get() == i
                         on:click=move |_| { node.set(i); slab.set(None); }>
-                        <title>{format!("{} · {} slabs", if n.leaf { "leaf" } else { "internal node" }, n.slabs.len())}</title>
+                        <title>{if n.leaf { format!("leaf · {own} slabs") } else { format!("internal node · {} children · no slabs of its own", n.entries.len()) }}</title>
                         <rect x=x - w / 2.0 y=y width=w height=NODE_H rx=if w < 12.0 { 2 } else { 5 }/>
                         <text x=x y=y + NODE_H / 2.0 + 4.0>{label}</text>
                     </g>
@@ -1206,14 +1206,18 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                 let s = m.slabs.get(k)?;
                 let d = &s.debug;
                 let segs: Vec<String> = s.runs.iter().map(segment_label).collect();
+                let realized = match m.kind {
+                    MemoryKind::Delta => format!("[ {} ]", s.realized.join(", ")),
+                    _ => s.realized.join(", "),
+                };
                 Some(view! {
                     <div class="mem-slab-detail">
                         <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
-                        <div class="dim mono">{format!("tail {} · weight {}", d.tail, d.weight)}</div>
-                        <div class="mem-line"><span class="dim">"bytes"</span><code>{slice_hex(&d.bytes)}</code></div>
-                        <div class="mem-line"><span class="dim">"segments"</span><code>{segs.join(" , ")}</code></div>
+                        <div class="dim mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
+                        <div class="mem-line"><code>{slice_hex(&d.bytes)}</code></div>
+                        <div class="mem-line"><code>{format!("[ {} ]", segs.join(", "))}</code></div>
                         {(!s.realized.is_empty()).then(|| view! {
-                            <div class="mem-line"><span class="dim">"realized"</span><code>{s.realized.join(" , ")}</code></div>
+                            <div class="mem-line"><code>{realized}</code></div>
                         })}
                     </div>
                 })
@@ -1251,13 +1255,22 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
     }
 }
 
-/// A run as hexane's segments read, e.g. `{ 5 x 3 }`, `{ Null x 2 }` or `{ Literal 1, 4, 9 }`.
+/// A run as a list reads it, e.g. `5 x10`, `NULL x2` or `1, 4, 9`.
 fn segment_label(r: &Run) -> String {
+    let cell = |v: &Cell| match v {
+        Cell::Null => "NULL".to_string(),
+        v => v.to_string(),
+    };
     match r.kind {
-        RunKind::Null => format!("{{ Null x {} }}", r.count),
-        RunKind::Repeat | RunKind::Bool => format!("{{ {} x {} }}", r.values.first().map(|v| v.to_string()).unwrap_or_default(), r.count),
-        _ => format!("{{ Literal {} }}", r.values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")),
+        RunKind::Null => format!("NULL x{}", r.count),
+        RunKind::Repeat | RunKind::Bool => format!("{} x{}", r.values.first().map(cell).unwrap_or_default(), r.count),
+        _ => r.values.iter().map(cell).collect::<Vec<_>>().join(", "),
     }
+}
+
+/// A weight's debug text without its type name, e.g. `{ len: 5, total: 9 }`.
+fn bare_agg(agg: &str) -> &str {
+    agg.find('{').map_or(agg, |i| &agg[i..])
 }
 
 /// The name of a field made of several columns, e.g. `Obj` or `ElemId`.

@@ -98,27 +98,30 @@ pub fn column_memory(col: &ColumnInfo) -> Result<ColumnMemory, String> {
 
 fn realize_delta(r: &Run, running: &mut i64) -> String {
     match r.kind {
-        RunKind::Null => format!("Null x {}", r.count),
+        RunKind::Null => format!("NULL x{}", r.count),
         RunKind::Repeat => {
             let step = cell_i64(r.values.first());
             let start = *running + step;
             *running += step * r.count as i64;
-            format!("DeltaRun start={start}, step={step}, count={}", r.count)
+            match (r.count, step) {
+                (1, _) => start.to_string(),
+                (_, 0) => format!("{start} x{}", r.count),
+                (_, 1) => format!("{start}..{}", *running),
+                _ => format!("{start}..{} Δ {step}", *running),
+            }
         }
-        _ => {
-            let values: Vec<String> = r
-                .values
-                .iter()
-                .map(|v| match v {
-                    Cell::Null => "null".to_string(),
-                    v => {
-                        *running += cell_i64(Some(v));
-                        running.to_string()
-                    }
-                })
-                .collect();
-            format!("Literal [{}]", values.join(", "))
-        }
+        _ => r
+            .values
+            .iter()
+            .map(|v| match v {
+                Cell::Null => "NULL".to_string(),
+                v => {
+                    *running += cell_i64(Some(v));
+                    running.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
     }
 }
 
