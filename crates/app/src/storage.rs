@@ -562,7 +562,7 @@ fn ChunkDetail() -> impl IntoView {
             Part::Changes => view! { <GroupPanel ops=false/> }.into_any(),
             Part::Ops => view! { <GroupPanel ops=true/> }.into_any(),
             Part::Extra => with_chunk(app, |f, c| {
-                let hex: String = extra_ranges(c).map(|r| hex_bytes(&f.bytes[r])).collect();
+                let hex: String = extra_ranges(c).flat_map(|r| f.bytes[r].iter().map(|x| format!("{x:02x} ")).collect::<Vec<_>>()).collect();
                 view! {
                     <div class="card">
                         <div class="card-title"><b>"Extra bytes"</b><span class="dim">"after the columns, not read by automerge"</span></div>
