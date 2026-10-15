@@ -527,6 +527,9 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-slab-card[style] { animation: slab-drop .45s cubic-bezier(.3, 1.25, .5, 1) both; }
 @keyframes slab-drop { from { transform: translate(var(--dx), var(--dy)) scale(.1); opacity: .3; } }
 .mem-slab-detail { margin-top: 40px; position: relative; }
+.mem-slab-detail { animation: detail-in .25s ease .45s both; }
+@keyframes detail-in { from { opacity: 0; } }
+.mem-fan line.late { animation: detail-in .25s ease .45s both; }
 .mem-slabs > span { grid-column: 1 / -1; }
 .mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-bundle-v0) 35%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
 .mem-slab:hover { filter: brightness(.92); }

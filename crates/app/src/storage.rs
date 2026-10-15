@@ -1183,7 +1183,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let hover = RwSignal::new(None::<Ids>);
     let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<TreeNode>), String>> = Cache::new();
     let mem_el = NodeRef::<leptos::html::Div>::new();
-    let fan = RwSignal::new((Vec::<(f64, f64, f64, f64)>::new(), false));
+    let fan = RwSignal::new((Vec::<(f64, f64, f64, f64, bool)>::new(), false));
     // Lines run from the picked leaf to each of its slabs, and from a picked
     // slab through its card to its bytes. On a new pick the slabs get their
     // offset from the leaf, and a new card its offset from its slab, so each
@@ -1209,7 +1209,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                 let _ = el.set_attribute("style", &format!("--dx:{}px;--dy:{dy}px;--i:{i}", x0 - x1));
             }
             if r.width() > 0.0 {
-                lines.push((x0, y0, x1, y1));
+                lines.push((x0, y0, x1, y1, false));
             }
         }
         let picked = root.query_selector(".mem-slab.sel").ok().flatten();
@@ -1219,8 +1219,8 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             let (p, c, b) = (p.get_bounding_client_rect(), card.get_bounding_client_rect(), b.get_bounding_client_rect());
             let px = p.left() + p.width() / 2.0 - base.left();
             let cx = c.left() + c.width() / 2.0 - base.left();
-            lines.push((px, p.bottom() - base.top(), cx, c.top() - base.top()));
-            lines.push((cx, c.bottom() - base.top(), cx, b.top() - base.top()));
+            lines.push((px, p.bottom() - base.top(), cx, c.top() - base.top(), true));
+            lines.push((cx, c.bottom() - base.top(), cx, b.top() - base.top(), true));
             if card.get_attribute("style").is_none() {
                 let dx = px - cx;
                 let dy = (p.top() + p.height() / 2.0) - (c.top() + c.height() / 2.0);
@@ -1383,7 +1383,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             fan.with(|(lines, _)| {
                 lines
                     .iter()
-                    .map(|&(x1, y1, x2, y2)| view! { <line x1=x1 y1=y1 x2=x2 y2=y2 pathLength="1"/> })
+                    .map(|&(x1, y1, x2, y2, late)| view! { <line class:late=late x1=x1 y1=y1 x2=x2 y2=y2 pathLength="1"/> })
                     .collect_view()
             })
         };
