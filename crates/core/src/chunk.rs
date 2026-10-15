@@ -207,15 +207,9 @@ pub fn chunk_hash(kind: u8, data: &[u8]) -> [u8; 32] {
 /// document chunks; [`parse_structure`] skips that.
 pub fn parse_file(bytes: &[u8]) -> FileReport {
     let mut report = parse_structure(bytes);
-    if report.has_hidden_deps() {
-        let mut inside: HashMap<String, usize> = HashMap::new();
-        for c in report.chunks.iter().filter(|c| !is_change(c)) {
-            for change in crate::doc::chunk_changes(bytes, c).unwrap_or_default() {
-                inside.entry(change.hash().to_string()).or_insert(c.index);
-            }
-        }
-        report.resolve_deps(|h| inside.get(h).copied());
-    }
+    let inside = report.holders(bytes);
+    report.resolve_deps(|h| inside.get(h).copied());
+    report.mark_redundant(|h| inside.get(h).copied());
     report
 }
 
@@ -251,6 +245,19 @@ fn is_change(c: &Chunk) -> bool {
     matches!(c.kind, ChunkKind::Change | ChunkKind::Compressed) && c.error.is_none()
 }
 
+fn has_deps(c: &Chunk) -> bool {
+    (is_change(c) || c.kind == ChunkKind::ChangeSet) && c.error.is_none()
+}
+
+/// The hashes that say what a chunk delivers: a change chunk's own, a change set's heads.
+fn delivers(c: &Chunk) -> Vec<String> {
+    match c.kind {
+        _ if is_change(c) => vec![c.hash_hex()],
+        ChunkKind::ChangeSet => c.facts.heads.clone(),
+        _ => vec![],
+    }
+}
+
 impl FileReport {
     /// Where each change hash first appears, from change chunks and the
     /// heads of other chunks.
@@ -280,7 +287,7 @@ impl FileReport {
         let mut out: Vec<String> = self
             .chunks
             .iter()
-            .filter(|c| is_change(c))
+            .filter(|c| has_deps(c))
             .flat_map(|c| c.facts.deps.iter())
             .filter(|d| !seen.contains_key(*d))
             .cloned()
@@ -295,7 +302,7 @@ impl FileReport {
     /// `None` when it's nowhere in the file.
     pub fn resolve_deps(&mut self, inside: impl Fn(&str) -> Option<usize>) {
         let seen = self.visible_hashes();
-        for c in self.chunks.iter_mut().filter(|c| is_change(c)) {
+        for c in self.chunks.iter_mut().filter(|c| has_deps(c)) {
             c.dep_order = c
                 .facts
                 .deps
@@ -307,6 +314,43 @@ impl FileReport {
                 })
                 .max()
                 .unwrap_or_default();
+        }
+    }
+
+    /// For each change stored in a chunk other than a change chunk, the
+    /// first such chunk. Runs automerge over every one of those chunks.
+    pub fn holders(&self, bytes: &[u8]) -> HashMap<String, usize> {
+        let mut inside: HashMap<String, usize> = HashMap::new();
+        for c in self.chunks.iter().filter(|c| !is_change(c) && c.error.is_none()) {
+            for change in crate::doc::chunk_changes(bytes, c).unwrap_or_default() {
+                inside.entry(change.hash().to_string()).or_insert(c.index);
+            }
+        }
+        inside
+    }
+
+    /// Every hash [`Self::mark_redundant`] and [`Self::resolve_deps`] may ask about.
+    pub fn probe_hashes(&self) -> Vec<String> {
+        let mut out = self.hidden_deps();
+        out.extend(self.chunks.iter().filter(|c| has_deps(c)).flat_map(delivers));
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Flags the change and change set chunks that deliver nothing new:
+    /// `holder` gives the first chunk other than a change chunk holding a change.
+    pub fn mark_redundant(&mut self, holder: impl Fn(&str) -> Option<usize>) {
+        let seen = self.visible_hashes();
+        for c in self.chunks.iter_mut().filter(|c| has_deps(c)) {
+            let earlier = |h: &String| {
+                let dup = is_change(c) && seen.get(h).is_some_and(|&i| i < c.index);
+                dup || holder(h).is_some_and(|i| i < c.index)
+            };
+            let hashes = delivers(c);
+            if !hashes.is_empty() && hashes.iter().all(earlier) {
+                c.redundant = true;
+            }
         }
     }
 

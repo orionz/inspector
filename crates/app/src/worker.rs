@@ -88,6 +88,9 @@ pub enum Req {
     Load { hidden_deps: Vec<String> },
     /// How long automerge takes to load the saved bytes.
     SavedLoadMs,
+    /// Which chunk of the loaded file first holds each of `hashes`, among
+    /// the chunks that aren't change chunks.
+    Holders { hashes: Vec<String> },
     Page { obj: String, step: usize, limit: usize, tombstones: bool },
     Text { obj: String, step: usize, limit_chars: usize, tombstones: bool },
     Json { obj: String, step: usize, limit: usize },
@@ -104,6 +107,7 @@ pub enum Resp {
     Json { json: String, cut: bool },
     Ops { ops: Vec<Op>, total: usize },
     Time(String),
+    Holders(Vec<(String, usize)>),
     Error(String),
 }
 
@@ -113,6 +117,7 @@ pub enum Resp {
 #[derive(Default)]
 struct Held {
     model: Option<DocModel>,
+    bytes: Vec<u8>,
     saved: Vec<u8>,
     heads: Option<(usize, Option<Vec<ChangeHash>>)>,
 }
@@ -172,6 +177,10 @@ fn now() -> f64 {
 fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Vec<u8>>) {
     if let Req::Load { hidden_deps } = req {
         return load(held, &bytes.unwrap_or_default(), hidden_deps);
+    }
+    if let Req::Holders { hashes } = req {
+        let inside = parse_structure(&held.bytes).holders(&held.bytes);
+        return (Resp::Holders(hashes.into_iter().filter_map(|h| inside.get(&h).map(|&i| (h, i))).collect()), None);
     }
     if let Req::SavedLoadMs = req {
         let start = now();
@@ -264,13 +273,13 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
             Resp::Ops { ops, total: all.len() }
         }
         Req::ChangeTime { index } => Resp::Time(m.changes.get(index).map(|c| format_time(c.time)).unwrap_or_default()),
-        Req::Load { .. } | Req::SavedLoadMs => unreachable!(),
+        Req::Load { .. } | Req::SavedLoadMs | Req::Holders { .. } => unreachable!(),
     };
     (resp, None)
 }
 
 fn load(held: &mut Held, bytes: &[u8], hidden_deps: Vec<String>) -> (Resp, Option<Vec<u8>>) {
-    *held = Held::default();
+    *held = Held { bytes: bytes.to_vec(), ..Held::default() };
     let start = now();
     let doc = Automerge::load_with_options(bytes, LoadOptions::new().on_partial_load(OnPartialLoad::Ignore));
     let load_ms = now() - start;

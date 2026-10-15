@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use am_inspect::{parse_structure, FileReport};
 use leptos::prelude::*;
@@ -197,6 +197,24 @@ impl AppState {
                     if self.file.with_untracked(|f| f.as_ref().map(Rc::as_ptr)) != opened {
                         return;
                     }
+                    let (hashes, which) = self
+                        .file
+                        .with_untracked(|f| f.as_ref().map(|f| (f.report.probe_hashes(), (f.name.clone(), f.bytes.len()))))
+                        .unwrap_or_default();
+                    leptos::task::spawn_local(async move {
+                        let Some((Resp::Holders(held), _)) = worker::call(None, Req::Holders { hashes }, None).await else { return };
+                        if self.file.with_untracked(|f| f.as_ref().map(|f| (f.name.clone(), f.bytes.len()))) != Some(which) {
+                            return;
+                        }
+                        let held: HashMap<String, usize> = held.into_iter().collect();
+                        self.file.update(|f| {
+                            if let Some(f) = f.as_mut() {
+                                let report = &mut Rc::make_mut(f).report;
+                                report.resolve_deps(|h| held.get(h).copied());
+                                report.mark_redundant(|h| held.get(h).copied());
+                            }
+                        });
+                    });
                     if let Ok(sum) = &doc {
                         self.load_ms.0.set(Some(sum.load_ms));
                         let known: HashSet<&str> = sum.known_deps.iter().map(String::as_str).collect();

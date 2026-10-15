@@ -225,6 +225,11 @@ fn main() {
     let dir: PathBuf = std::env::args().nth(1).unwrap_or("corpus".into()).into();
     std::fs::create_dir_all(&dir).unwrap();
 
+    let trace = edit_trace::Fixtures::build();
+    write(&dir, "edit-trace-incrementals.automerge", &trace.incrementals);
+    write(&dir, "edit-trace-fragments.automerge", &trace.fragments);
+    write(&dir, "edit-trace-next-incrementals.automerge", &trace.next_incrementals);
+
     let mut todo = todo_doc();
     write(&dir, "todo-doc.automerge", &todo.save());
     write(&dir, "todo-doc-nocompress.automerge", &todo.save_nocompress());
@@ -271,5 +276,149 @@ mod next_api {
             bytes.extend(doc.save_incremental());
         }
         bytes
+    }
+}
+
+/// Martin Kleppmann's LaTeX editing trace replayed one keystroke per change.
+mod edit_trace {
+    use automerge::transaction::{CommitOptions, Transactable};
+    use automerge::next::transaction::Transactable as _;
+    use automerge::{next, ObjType, ROOT};
+
+    use super::{actor, T0};
+
+    const LOOSE: usize = 60;
+
+    /// The same history three ways: a document chunk holding the first 40%
+    /// followed by 5% incremental saves, one written out of order, one from
+    /// an unrelated document, one repeating changes the document chunk
+    /// already holds, and the last keystrokes as loose change chunks; then
+    /// those incrementals as next-API change sets; and the whole history as
+    /// the fragments and loose commits subduction would store.
+    pub struct Fixtures {
+        pub incrementals: Vec<u8>,
+        pub fragments: Vec<u8>,
+        pub next_incrementals: Vec<u8>,
+    }
+
+    fn edits() -> Vec<(usize, usize, String)> {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../automerge/rust/edit-trace/edits.json");
+        let json: Vec<Vec<serde_json::Value>> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        json.into_iter()
+            .map(|e| {
+                let text = e[2..].iter().filter_map(|v| v.as_str()).collect();
+                (e[0].as_u64().unwrap() as usize, e[1].as_u64().unwrap() as usize, text)
+            })
+            .collect()
+    }
+
+    /// When keystroke `i` happened: a steady typist who stops for coffee
+    /// every few thousand keys.
+    fn time(i: usize) -> i64 {
+        T0 + i as i64 * 170 + (i / 3_000) as i64 * 25 * 60_000 + (i * 7919 % 97) as i64
+    }
+
+    struct Saves {
+        doc: Vec<u8>,
+        /// One per 5% of the history after the document chunk.
+        incrementals: Vec<Vec<u8>>,
+        /// The changes between 38% and 40%, all in the document chunk.
+        redundant: Vec<u8>,
+    }
+
+    impl Fixtures {
+        pub fn build() -> Self {
+            let edits = edits();
+            let n = edits.len();
+            let typist = || actor("kleppmann-thinkpad");
+            let mut doc = automerge::AutoCommit::new().with_actor(typist());
+            let mut nx = next::AutoCommit::new().with_actor(typist());
+            let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+            let ntext = nx.put_object(ROOT, "text", ObjType::Text).unwrap();
+            doc.commit_with(CommitOptions::default().with_time(T0).with_message("new paper"));
+            nx.commit_with(next::transaction::CommitOptions::default().with_time(T0).with_message("new paper"));
+
+            let step = n / 20;
+            let first = step * 8;
+            let marks: Vec<usize> = (first..n - LOOSE).step_by(step).skip(1).chain([n - LOOSE]).collect();
+            let (mut legacy, mut changesets) = (
+                Saves { doc: vec![], incrementals: vec![], redundant: vec![] },
+                Saves { doc: vec![], incrementals: vec![], redundant: vec![] },
+            );
+            let (mut at_38, mut next_at_38) = (vec![], vec![]);
+            let mut loose = vec![];
+            for (i, (pos, del, ins)) in edits.into_iter().enumerate() {
+                doc.splice_text(&text, pos, del as isize, &ins).unwrap();
+                nx.splice_text(&ntext, pos, del as isize, &ins).unwrap();
+                doc.commit_with(CommitOptions::default().with_time(time(i)));
+                nx.commit_with(next::transaction::CommitOptions::default().with_time(time(i)));
+                let done = i + 1;
+                if done == step * 38 / 5 {
+                    at_38 = doc.get_heads();
+                    next_at_38 = nx.get_heads();
+                }
+                if done == first {
+                    legacy.doc = doc.save();
+                    legacy.redundant = doc.save_after(&at_38);
+                    changesets.redundant = nx.save_after(&next_at_38).unwrap();
+                    doc.save_incremental();
+                    nx.save_incremental();
+                }
+                if marks.contains(&done) {
+                    legacy.incrementals.push(doc.save_incremental());
+                    changesets.incrementals.push(nx.save_incremental());
+                }
+                if done > n - LOOSE {
+                    loose.extend(doc.get_last_local_change().unwrap().raw_bytes());
+                }
+            }
+            changesets.doc = legacy.doc.clone();
+            assert_eq!(legacy.incrementals.len(), 12);
+
+            let fragments = doc.fragments(..);
+            let fragments = doc.change_sets_for_fragments(fragments).unwrap().concat();
+            Self {
+                incrementals: layout(legacy, foreign_legacy(), &loose),
+                next_incrementals: layout(changesets, foreign_next(), &loose),
+                fragments,
+            }
+        }
+    }
+
+    fn layout(s: Saves, foreign: Vec<u8>, loose: &[u8]) -> Vec<u8> {
+        let mut inc = s.incrementals.into_iter();
+        let mut take = |k: usize| inc.by_ref().take(k).collect::<Vec<_>>().concat();
+        let (one_two, three, four) = (take(2), take(1), take(1));
+        [s.doc, one_two, four, three, take(1), foreign, take(2), s.redundant, take(5), loose.to_vec()].concat()
+    }
+
+    const OTHER: &str = "Notes from a different document, which nothing here depends on. ";
+
+    fn foreign_legacy() -> Vec<u8> {
+        let mut doc = automerge::AutoCommit::new().with_actor(actor("someone-elses-laptop"));
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, OTHER).unwrap();
+        doc.commit_with(CommitOptions::default().with_time(time(150_000)));
+        doc.save();
+        for (i, c) in "and more typing".chars().enumerate() {
+            let at = OTHER.len() + i;
+            doc.splice_text(&text, at, 0, &c.to_string()).unwrap();
+            doc.commit_with(CommitOptions::default().with_time(time(150_001 + i)));
+        }
+        doc.save_incremental()
+    }
+
+    fn foreign_next() -> Vec<u8> {
+        let mut doc = next::AutoCommit::new().with_actor(actor("someone-elses-laptop"));
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, OTHER).unwrap();
+        doc.commit_with(next::transaction::CommitOptions::default().with_time(time(150_000)));
+        doc.save_incremental();
+        for (i, c) in "and more typing".chars().enumerate() {
+            let at = OTHER.len() + i;
+            doc.splice_text(&text, at, 0, &c.to_string()).unwrap();
+            doc.commit_with(next::transaction::CommitOptions::default().with_time(time(150_001 + i)));
+        }
+        doc.save_incremental()
     }
 }

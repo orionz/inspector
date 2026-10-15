@@ -26,6 +26,9 @@ const APP_COMMIT: &str = match option_env!("APP_COMMIT") {
 };
 
 const SAMPLES: &[(&str, &str)] = &[
+    ("edit-trace-incrementals.automerge", "editing trace, a change per keystroke: save() at 40%, then 5% incrementals — one out of order, one from another document, one redundant — and loose changes"),
+    ("edit-trace-fragments.automerge", "the same history as subduction stores it: next API fragments and loose commits"),
+    ("edit-trace-next-incrementals.automerge", "the same layout as the first, its incrementals written as next API change sets"),
     ("todo-save-plus-incrementals.automerge", "save() then 104 × save_incremental(): bulk imports between runs of single edits"),
     ("text-next-save-plus-incrementals.automerge", "next API: change-set save + incremental change sets"),
     ("text-next-changeset.automerge", "whole document as one change set chunk"),

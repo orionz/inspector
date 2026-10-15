@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use am_inspect::chunk::{Chunk, DepOrder, SectionKind};
+use am_inspect::chunk::{Chunk, ChunkKind, DepOrder, SectionKind};
 use am_inspect::columns::{
     build_rows, decode_runs, decode_value, slice_hex, value_type_name, Cell, ColType, ColumnInfo, DecodedRuns, Run,
     RunKind, RowTable,
@@ -79,6 +79,14 @@ const ABSORB_FACTOR: usize = 3;
 const BLOCK_MIN_H: f64 = 26.0;
 /// Vertical space per tiny chunk, so the cursor steps through them one by one.
 const BAND_PITCH: f64 = 3.0;
+/// The tallest a run of bands grows; past it the chunks share the height.
+const BANDS_MAX_H: f64 = 1800.0;
+/// The thinnest a stripe flagging a chunk's merge status is drawn.
+const STATUS_MIN_H: f64 = 4.0;
+
+fn band_pitch(n: usize) -> f64 {
+    BAND_PITCH.min(BANDS_MAX_H / n.max(1) as f64)
+}
 /// Size spreads above this ratio switch block heights to a log scale.
 const LINEAR_SPREAD: usize = 8;
 
@@ -93,7 +101,7 @@ impl StackItem {
             StackItem::Block { height, .. } => *height,
             StackItem::Bands { first, last } => {
                 let n = last - first + 1;
-                BAND_PITCH * n as f64
+                band_pitch(n) * n as f64
             }
         }
     }
@@ -103,8 +111,11 @@ impl StackItem {
 /// pulled into neighbouring bands so a run of similar sizes isn't split
 /// into alternating bands and blocks.
 fn tiny_chunks(chunks: &[Chunk], file_len: usize) -> Vec<bool> {
-    let mut tiny: Vec<bool> = chunks.iter().map(|c| c.len() * TINY_SHARE < file_len).collect();
-    let near = |c: &Chunk| c.len() * TINY_SHARE < file_len * ABSORB_FACTOR;
+    let mut tiny: Vec<bool> = chunks
+        .iter()
+        .map(|c| c.kind != ChunkKind::Document && c.len() * TINY_SHARE < file_len)
+        .collect();
+    let near = |c: &Chunk| c.kind != ChunkKind::Document && c.len() * TINY_SHARE < file_len * ABSORB_FACTOR;
     for i in (1..chunks.len()).chain((0..chunks.len().saturating_sub(1)).rev()) {
         let neighbour = (i > 0 && tiny[i - 1]) || tiny.get(i + 1).copied().unwrap_or(false);
         if !tiny[i] && neighbour && near(&chunks[i]) {
@@ -153,12 +164,22 @@ fn stack_layout(chunks: &[Chunk], file_len: usize) -> StackLayout {
 fn band_background(chunks: &[Chunk]) -> String {
     let n = chunks.len().max(1);
     let pct = |i: usize| i as f64 * 100.0 / n as f64;
+    let min_status = STATUS_MIN_H * 100.0 / (band_pitch(n) * n as f64);
     let mut stops = vec![];
     let mut start = 0;
+    let mut drawn_to = 0.0f64;
     for i in 1..=chunks.len() {
         if i == chunks.len() || color_key(&chunks[i]) != color_key(&chunks[start]) {
             let k = color_key(&chunks[start]);
-            stops.push(format!("var(--k-{k}) {:.5}% {:.5}%", pct(start), pct(i)));
+            let from = pct(start).max(drawn_to);
+            let to = match status_key(&chunks[start]) {
+                Some(_) => pct(i).max(from + min_status).min(100.0),
+                None => pct(i),
+            };
+            if to > from {
+                stops.push(format!("var(--k-{k}) {from:.5}% {to:.5}%"));
+                drawn_to = to;
+            }
             start = i;
         }
     }
@@ -221,7 +242,7 @@ fn hit_rows(layout: &StackLayout) -> Vec<HitRow> {
         match *item {
             StackItem::Block { .. } => rows.push(HitRow { top: y, bottom: y + h, band: false }),
             StackItem::Bands { first, last } => {
-                let pitch = BAND_PITCH;
+                let pitch = band_pitch(last - first + 1);
                 for i in 0..=last - first {
                     let top = y + i as f64 * pitch;
                     rows.push(HitRow { top, bottom: top + pitch, band: true });
