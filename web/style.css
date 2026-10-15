@@ -15,7 +15,7 @@
   --k-change: #5fd3b5;
   --k-compressed: #b48cf2;
   --k-bundle: #f0b45a;
-  --k-changeset: #f27a9b;
+  --k-changeset: #b8d94a;
   --k-unknown: #6b7280;
   --k-late: #ff9a3c;
   --k-redundant: #e535d6;
@@ -194,15 +194,20 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .blk.k-compressed, .deck-panel.k-compressed { --kc: var(--k-compressed); } .blk.k-bundle, .deck-panel.k-bundle { --kc: var(--k-bundle); }
 .blk.k-changeset, .deck-panel.k-changeset { --kc: var(--k-changeset); }
 .blk.k-late, .deck-panel.k-late { --kc: var(--k-late); } .blk.k-redundant, .deck-panel.k-redundant, .dep-warning.k-redundant { --kc: var(--k-redundant); } .blk.k-missing, .deck-panel.k-missing { --kc: var(--k-missing); }
+.blk, .deck-panel { --fc: var(--kc); }
+.st-late { --fc: var(--k-late); } .st-redundant { --fc: var(--k-redundant); } .st-missing { --fc: var(--k-missing); }
 .dep-warning { --kc: var(--k-late); background: color-mix(in srgb, var(--kc) 16%, var(--panel)); border: 1px solid var(--kc); border-radius: 6px; padding: 6px 10px; margin: 6px 0; font-size: 12.5px; }
 .dep-warning.k-missing { --kc: var(--k-missing); }
 .blk {
   height: calc(var(--h) * 1px); min-height: 2px; flex: none;
   border-left: 4px solid var(--kc); border-radius: 6px;
-  background: color-mix(in srgb, var(--kc) 16%, var(--panel));
+  background: color-mix(in srgb, var(--fc) 16%, var(--panel));
   transition: background .2s ease;
 }
-.blk:hover { background: color-mix(in srgb, var(--kc) 28%, var(--panel)); }
+.blk[class*=st-] { background: color-mix(in srgb, var(--fc) 45%, var(--panel)); }
+.blk:hover { background: color-mix(in srgb, var(--fc) 28%, var(--panel)); }
+.deck-panel[class*=st-] { background: color-mix(in srgb, var(--fc) 42%, var(--panel)); }
+.blk[class*=st-]:hover { background: color-mix(in srgb, var(--fc) 60%, var(--panel)); }
 
 .bands { flex: none; height: calc(var(--h) * 1px); }
 .band-fill { height: 100%; opacity: .55; -webkit-mask: repeating-linear-gradient(#000 0 2px, transparent 2px 3px); mask: repeating-linear-gradient(#000 0 2px, transparent 2px 3px); }
@@ -216,7 +221,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
   position: absolute; left: -20px; right: -20px; top: calc(var(--zh) * -.5px); height: calc(var(--zh) * 1px); z-index: 3; overflow: hidden;
   display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 0 12px;
   border-left: 4px solid var(--kc); border-radius: 8px;
-  background: color-mix(in srgb, var(--kc) 22%, var(--panel));
+  background: color-mix(in srgb, var(--fc) 22%, var(--panel));
   box-shadow: 0 0 0 1px var(--line), 0 10px 28px rgba(0, 0, 0, .28);
   font-size: 12.5px; white-space: nowrap;
   transition: top .32s var(--ease), height .32s var(--ease), left .32s var(--ease), right .32s var(--ease),
@@ -237,7 +242,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
 
 .storage.open .stack { height: 100%; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
 .storage.open .blk, .storage.open .bands { height: auto; flex: var(--h) 1 0; border-left-width: 0; border-radius: 3px; }
-.storage.open .blk { background: var(--kc); opacity: .5; }
+.storage.open .blk { background: var(--fc); opacity: .5; }
 .storage.open .blk.sel, .storage.open .bands.sel { opacity: 1; outline: 2px solid var(--text); outline-offset: -2px; }
 .storage.open .deck { display: none; }
 .stack-label { position: absolute; inset: 0; z-index: 2; pointer-events: none; }

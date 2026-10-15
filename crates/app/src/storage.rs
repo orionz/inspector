@@ -237,7 +237,7 @@ fn hit_rows(layout: &StackLayout) -> Vec<HitRow> {
 #[derive(Clone)]
 struct ChunkCard {
     index: usize,
-    kind: &'static str,
+    kind: String,
     label: String,
     stats: String,
     context: String,
@@ -245,13 +245,25 @@ struct ChunkCard {
 }
 
 fn color_key(c: &Chunk) -> &'static str {
+    status_key(c).unwrap_or(c.kind.key())
+}
+
+fn status_key(c: &Chunk) -> Option<&'static str> {
     if c.redundant {
-        return "redundant";
+        return Some("redundant");
     }
     match c.dep_order {
-        DepOrder::InOrder => c.kind.key(),
-        DepOrder::Late => "late",
-        DepOrder::Missing => "missing",
+        DepOrder::InOrder => None,
+        DepOrder::Late => Some("late"),
+        DepOrder::Missing => Some("missing"),
+    }
+}
+
+/// A block's classes: its kind colours its edge and name tag, its merge status, if any, its fill.
+fn block_class(c: &Chunk) -> String {
+    match status_key(c) {
+        Some(st) => format!("k-{} st-{st}", c.kind.key()),
+        None => format!("k-{}", c.kind.key()),
     }
 }
 
@@ -282,7 +294,7 @@ fn chunk_card(c: &Chunk, file_len: usize) -> ChunkCard {
     };
     ChunkCard {
         index: c.index,
-        kind: color_key(c),
+        kind: block_class(c),
         label: c.kind.label(),
         stats: chunk_stats(c, file_len),
         context,
@@ -337,7 +349,7 @@ fn ChunkStack() -> impl IntoView {
                         let h = item.height().to_string();
                         match item {
                             StackItem::Block { index, .. } => view! {
-                                <div class=format!("blk k-{}", color_key(&f.report.chunks[index]))
+                                <div class=format!("blk {}", block_class(&f.report.chunks[index]))
                                     class:sel=move || app.chunk.get() == Some(index) data-i=index
                                     style:--h=h></div>
                             }
@@ -386,7 +398,8 @@ fn ChunkStack() -> impl IntoView {
     };
     let panel = move |k: usize| {
         let card = cards.with_value(|c| c[k].clone());
-        let kind = card.kind;
+        let kind = card.kind.clone();
+        let tag = kind.split(' ').next().unwrap_or_default().to_string();
         let block = if rows.with_value(|r| r[k].band) { "" } else { " block" };
         let class = move || {
             let role = match hovered.get().map(|h| k as isize - h as isize).unwrap_or(0) {
@@ -396,13 +409,13 @@ fn ChunkStack() -> impl IntoView {
                 1 => "after",
                 _ => "after2",
             };
-            format!("deck-panel k-{kind} {role}{block}")
+            format!("deck-panel {kind} {role}{block}")
         };
         view! {
             <div class=class data-k=k>
                 <div class="deck-line">
                     <span class="idx">{format!("#{}", card.index)}</span>
-                    <span class=format!("chip k-{kind}")>{card.label}</span>
+                    <span class=format!("chip {tag}")>{card.label}</span>
                     <span>{card.stats}</span>
                     {card.flagged.then(|| view! { <span class="bad" title="checksum mismatch or parse error">"!"</span> })}
                 </div>
@@ -646,7 +659,7 @@ fn ChunkFacts(chunk: Chunk) -> impl IntoView {
     view! {
         <div class="card">
             <div class="card-title">
-                <span class=format!("chip k-{}", color_key(&c))>{c.kind.label()}</span>
+                <span class=format!("chip k-{}", c.kind.key())>{c.kind.label()}</span>
                 <b>{format!("chunk #{}", c.index)}</b>
                 <span>{fmt::bytes(c.len())}</span>
                 <span class="dim">{format!("bytes {}..{}", c.range.start, c.range.end)}</span>
