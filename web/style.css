@@ -498,12 +498,18 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-node:hover rect { filter: brightness(.92); }
 .mem-node.sel rect { stroke: var(--text); stroke-width: 2; }
 .mem-node text { font-size: 11px; text-anchor: middle; fill: var(--text); pointer-events: none; }
-.mem-slabs { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0; }
+.mem-slabs { display: grid; grid-template-columns: repeat(16, max-content); gap: 3px; margin: 8px 0; }
+.mem-slabs > span { grid-column: 1 / -1; }
 .mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-bundle) 35%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
 .mem-slab:hover { filter: brightness(.92); }
 .mem-slab.sel { outline: 2px solid var(--text); color: var(--text); }
 .mem-slab-detail { border-top: 1px solid var(--line); padding-top: 8px; }
 .mem-detail { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12.5px; }
 .mem-detail ul { margin: 6px 0 0; padding-left: 18px; max-height: 320px; overflow: auto; }
-.mem-line { margin-top: 6px; }
-.mem-line code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.mem-sec { --sec: var(--k-doc); margin-top: 8px; padding: 6px 9px; border: 1.5px solid color-mix(in srgb, var(--sec) 70%, var(--panel)); border-radius: 6px; background: color-mix(in srgb, var(--sec) 12%, var(--panel)); }
+.mem-sec code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
+.mem-segs { --sec: var(--k-change); }
+.mem-realized { --sec: var(--k-compressed); }
+.mem-arrow { text-align: center; color: var(--dim); font-size: 16px; line-height: 1; margin-top: 6px; }
+.tok.linked { border-radius: 3px; outline: 2px solid transparent; outline-offset: 1px; }
+.tok.hl { outline-color: #f5c400; background: color-mix(in srgb, #f5c400 30%, transparent); }

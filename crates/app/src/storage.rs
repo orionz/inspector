@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 
 use crate::fmt;
 use crate::state::{AppState, Cache, ColumnRef, GroupView, Loaded, Part};
-use am_inspect::memory::{column_memory, ColumnMemory, MemoryKind, NodeDebug};
+use am_inspect::memory::{column_memory, ColumnMemory, MemoryKind, MemorySlab, NodeDebug};
 
 fn with_chunk<R>(app: AppState, f: impl FnOnce(&Rc<Loaded>, &Chunk) -> R) -> Option<R> {
     let idx = app.chunk.get()?;
@@ -592,18 +592,6 @@ fn ChunkDetail() -> impl IntoView {
                     {side_tab(GroupView::Logical, "Logical")}
                 </nav>
             </Show>
-            <Show when=move || {
-                let raw = ops_part().is_some_and(|ops| {
-                    let (a, b) = app.group_view.get();
-                    (if ops { b } else { a }) == GroupView::Raw
-                });
-                raw && app.column.get().is_some()
-            }>
-                <nav class="side-tabs">
-                    <button class:active=move || !app.in_memory.get() on:click=move |_| app.in_memory.set(false)><span>"On Disk"</span></button>
-                    <button class:active=move || app.in_memory.get() on:click=move |_| app.in_memory.set(true)><span>"In Memory"</span></button>
-                </nav>
-            </Show>
         </div>
     }
 }
@@ -718,8 +706,12 @@ fn GroupPanel(ops: bool) -> impl IntoView {
                         };
                         view! {
                             <nav class="strip-tabs" class:hidden=move || app.column.get().is_some()>
-                                {strip_tab(GroupView::Physical, "Grouped")}
+                                {strip_tab(GroupView::Physical, "Cooked")}
                                 {strip_tab(GroupView::Raw, "Raw")}
+                            </nav>
+                            <nav class="strip-tabs" class:hidden=move || grouped || app.column.get().is_none_or(|c| c.ops != ops)>
+                                <button class:active=move || !app.in_memory.get() on:click=move |_| app.in_memory.set(false)>"On Disk"</button>
+                                <button class:active=move || app.in_memory.get() on:click=move |_| app.in_memory.set(true)>"In Memory"</button>
                             </nav>
                             <div class="col-view" class:open=move || app.column.get().is_some_and(|c| c.ops == ops)>
                                 <div class="cols-wrap"><ColumnStrip ops=ops grouped=grouped/></div>
@@ -1133,6 +1125,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let app = expect_context::<AppState>();
     let node = RwSignal::new(0usize);
     let slab = RwSignal::new(None::<usize>);
+    let hover = RwSignal::new(None::<Ids>);
     let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<TreeNode>), String>> = Cache::new();
     move || {
         let mem = with_chunk(app, |f, c| {
@@ -1205,20 +1198,36 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             let slab_detail = slab.get().and_then(|k| {
                 let s = m.slabs.get(k)?;
                 let d = &s.debug;
-                let segs: Vec<String> = s.runs.iter().map(segment_label).collect();
-                let realized = match m.kind {
-                    MemoryKind::Delta => format!("[ {} ]", s.realized.join(", ")),
-                    _ => s.realized.join(", "),
+                let [bytes, segs, realized] = slab_tokens(s);
+                let section = move |class: &'static str, toks: Vec<Tok>, sep: &'static str, open: &'static str, close: &'static str| {
+                    let toks = toks
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            let lit = move || hover.get().zip(t.ids).is_some_and(|(h, ids)| h.0 <= ids.0 && ids.1 <= h.1);
+                            view! {
+                                {(i > 0).then_some(sep)}
+                                <span class="tok" class:linked=t.ids.is_some() class:hl=lit
+                                    on:mouseenter=move |_| hover.set(t.ids)
+                                    on:mouseleave=move |_| hover.set(None)>{t.text}</span>
+                            }
+                        })
+                        .collect_view();
+                    view! { <div class=format!("mem-sec {class}")><code>{open}{toks}{close}</code></div> }
+                };
+                let third = match (m.kind, &s.prefix) {
+                    (MemoryKind::Delta, _) => Some(section("mem-realized", realized, ", ", "[ ", " ]").into_any()),
+                    (_, Some(p)) => Some(view! { <div class="mem-sec mem-realized"><code>{p.clone()}</code></div> }.into_any()),
+                    _ => None,
                 };
                 Some(view! {
                     <div class="mem-slab-detail">
                         <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
                         <div class="dim mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
-                        <div class="mem-line"><code>{slice_hex(&d.bytes)}</code></div>
-                        <div class="mem-line"><code>{format!("[ {} ]", segs.join(", "))}</code></div>
-                        {(!s.realized.is_empty()).then(|| view! {
-                            <div class="mem-line"><code>{realized}</code></div>
-                        })}
+                        {section("mem-bytes", bytes, " ", "[", "]")}
+                        <div class="mem-arrow">"↓"</div>
+                        {section("mem-segs", segs, ", ", "[ ", " ]")}
+                        {third.map(|t| view! { <div class="mem-arrow">"↓"</div> {t} })}
                     </div>
                 })
             });
@@ -1255,7 +1264,68 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
     }
 }
 
-/// A run as a list reads it, e.g. `5 x10`, `NULL x2` or `1, 4, 9`.
+/// Value ids a token stands for, as a half-open range numbered across the slab.
+type Ids = (usize, usize);
+
+/// A piece of a slab's text that highlights along with the pieces whose ids it covers.
+struct Tok {
+    text: String,
+    ids: Option<Ids>,
+}
+
+/// A slab's bytes, its segments and its realized delta values, cut so that
+/// every literal value, and every other run, has the same ids in all three.
+/// A literal run's header bytes cover all of its values.
+fn slab_tokens(s: &MemorySlab) -> [Vec<Tok>; 3] {
+    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ");
+    let cell = |v: &Cell| match v {
+        Cell::Null => "NULL".to_string(),
+        v => v.to_string(),
+    };
+    let data = &s.debug.bytes;
+    let slice = |r: std::ops::Range<usize>| &data[r.start.min(data.len())..r.end.min(data.len())];
+    let (mut bytes, mut segs, mut realized) = (vec![], vec![], vec![]);
+    let mut next = 0;
+    let mut at = 0;
+    for (k, r) in s.runs.iter().enumerate() {
+        if r.bytes.start > at {
+            bytes.push(Tok { text: hex(slice(at..r.bytes.start)), ids: None });
+        }
+        at = at.max(r.bytes.end);
+        let per_value = matches!(r.kind, RunKind::Literal) && !r.values.is_empty() && r.value_starts.len() == r.values.len();
+        let n = if per_value { r.values.len() } else { 1 };
+        let run_ids = Some((next, next + n));
+        let realized_run = s.realized.get(k);
+        if per_value {
+            if r.value_starts[0] > r.bytes.start {
+                bytes.push(Tok { text: hex(slice(r.bytes.start..r.value_starts[0])), ids: run_ids });
+            }
+            for (i, v) in r.values.iter().enumerate() {
+                let ids = Some((next + i, next + i + 1));
+                let end = r.value_starts.get(i + 1).copied().unwrap_or(r.bytes.end);
+                bytes.push(Tok { text: hex(slice(r.value_starts[i]..end)), ids });
+                segs.push(Tok { text: cell(v), ids });
+            }
+        } else {
+            bytes.push(Tok { text: hex(slice(r.bytes.clone())), ids: run_ids });
+            segs.push(Tok { text: segment_label(r), ids: run_ids });
+        }
+        match realized_run {
+            Some(vals) if vals.len() == n => {
+                realized.extend(vals.iter().enumerate().map(|(i, v)| Tok { text: v.clone(), ids: Some((next + i, next + i + 1)) }))
+            }
+            Some(vals) => realized.extend(vals.iter().map(|v| Tok { text: v.clone(), ids: run_ids })),
+            None => {}
+        }
+        next += n;
+    }
+    if at < data.len() {
+        bytes.push(Tok { text: hex(&data[at..]), ids: None });
+    }
+    [bytes, segs, realized]
+}
+
+/// A non-literal run as a list reads it, e.g. `5 x10` or `NULL x2`.
 fn segment_label(r: &Run) -> String {
     let cell = |v: &Cell| match v {
         Cell::Null => "NULL".to_string(),

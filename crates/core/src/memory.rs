@@ -23,9 +23,12 @@ pub struct MemorySlab {
     pub debug: SlabDebug,
     /// The slab's bytes decoded into runs, rows counted from the slab's start.
     pub runs: Vec<Run>,
-    /// For delta and prefix columns, what the runs mean once the rest of
-    /// the column is taken into account.
-    pub realized: Vec<String>,
+    /// For delta columns, the values each run stands for once the slabs
+    /// before it are taken into account: one entry per literal value, or one
+    /// for a whole repeat or null run.
+    pub realized: Vec<Vec<String>>,
+    /// For prefix columns, the running sum the index keeps at this slab.
+    pub prefix: Option<String>,
 }
 
 pub struct ColumnMemory {
@@ -81,23 +84,23 @@ pub fn column_memory(col: &ColumnInfo) -> Result<ColumnMemory, String> {
             let slab_col = ColumnInfo { data: Arc::from(debug.bytes.as_slice()), file_offset: None, stored_len: debug.bytes.len(), ..col.clone() };
             let runs = decode_runs(&slab_col).runs;
             let realized = match kind {
-                MemoryKind::Plain => vec![],
                 MemoryKind::Delta => runs.iter().map(|r| realize_delta(r, &mut running)).collect(),
-                MemoryKind::Prefix => {
-                    let total: u64 = runs.iter().map(|r| prefix_weight(col.col_type(), r)).sum();
-                    let line = format!("Prefix={prefix}, Total={total}, Count={}", debug.len);
-                    prefix += total;
-                    vec![line]
-                }
+                _ => vec![],
             };
-            MemorySlab { debug, runs, realized }
+            let prefix = (kind == MemoryKind::Prefix).then(|| {
+                let total: u64 = runs.iter().map(|r| prefix_weight(col.col_type(), r)).sum();
+                let line = format!("Prefix={prefix}, Total={total}, Count={}", debug.len);
+                prefix += total;
+                line
+            });
+            MemorySlab { debug, runs, realized, prefix }
         })
         .collect();
     Ok(ColumnMemory { type_name, kind, index, slabs })
 }
 
-fn realize_delta(r: &Run, running: &mut i64) -> String {
-    match r.kind {
+fn realize_delta(r: &Run, running: &mut i64) -> Vec<String> {
+    let one = match r.kind {
         RunKind::Null => format!("NULL x{}", r.count),
         RunKind::Repeat => {
             let step = cell_i64(r.values.first());
@@ -110,19 +113,21 @@ fn realize_delta(r: &Run, running: &mut i64) -> String {
                 _ => format!("{start}..{} Δ {step}", *running),
             }
         }
-        _ => r
-            .values
-            .iter()
-            .map(|v| match v {
-                Cell::Null => "NULL".to_string(),
-                v => {
-                    *running += cell_i64(Some(v));
-                    running.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(", "),
-    }
+        _ => {
+            return r
+                .values
+                .iter()
+                .map(|v| match v {
+                    Cell::Null => "NULL".to_string(),
+                    v => {
+                        *running += cell_i64(Some(v));
+                        running.to_string()
+                    }
+                })
+                .collect()
+        }
+    };
+    vec![one]
 }
 
 fn prefix_weight(ty: ColType, r: &Run) -> u64 {
