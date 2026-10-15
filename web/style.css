@@ -43,6 +43,8 @@
   --r-null: #6b7489;
   --r-bool: #7aa2ff;
   --r-raw: #d6c86a;
+  --v-count: #f0b45a;
+  --v-null: #f27a9b;
   color-scheme: dark;
 }
 
@@ -58,6 +60,8 @@
     --ok: #138a6a;
     --bad: #d63850;
     --sel: rgba(58, 106, 232, 0.12);
+    --v-count: #b86e00;
+    --v-null: #c22a6a;
     color-scheme: light;
   }
 }
@@ -526,6 +530,8 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-realized { --sec: var(--k-compressed); }
 .mem-arrow { display: block; margin: 6px auto 0; fill: color-mix(in srgb, var(--dim) 75%, var(--panel)); }
 .mem-head b { overflow-wrap: anywhere; }
+.mem-count { color: var(--v-count); font-weight: 600; }
+.mem-null { color: var(--v-null); font-style: italic; }
 .tok.linked { border-radius: 3px; outline: 2px solid transparent; outline-offset: 1px; }
 .tok.hl { outline-color: #f5c400; background: color-mix(in srgb, #f5c400 30%, transparent); }
 

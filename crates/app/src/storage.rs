@@ -1309,6 +1309,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             let s = m.slabs.get(k)?;
             let [bytes, segs, realized] = slab_tokens(s);
             let section = move |class: &'static str, toks: Vec<Tok>, sep: &'static str, open: &'static str, close: &'static str| {
+                let marks = class != "mem-bytes";
                 let toks = toks
                     .into_iter()
                     .enumerate()
@@ -1318,7 +1319,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                             {(i > 0).then_some(sep)}
                             <span class="tok" class:linked=t.ids.is_some() class:hl=lit
                                 on:mouseenter=move |_| hover.set(t.ids)
-                                on:mouseleave=move |_| hover.set(None)>{t.text}</span>
+                                on:mouseleave=move |_| hover.set(None)>{marked(t.text, marks)}</span>
                         }
                     })
                     .collect_view();
@@ -1430,6 +1431,26 @@ fn slab_tokens(s: &MemorySlab) -> [Vec<Tok>; 3] {
         bytes.push(Tok { text: hex(&data[at..]), ids: None });
     }
     [bytes, segs, realized]
+}
+
+/// `text` with a trailing repeat count or delta step, and a NULL, coloured
+/// apart from the value it qualifies; plain when `marks` is false.
+fn marked(text: String, marks: bool) -> impl IntoView {
+    let digits = |s: &str| !s.is_empty() && s.trim_start_matches('-').bytes().all(|b| b.is_ascii_digit());
+    let split = [" x", " Δ "]
+        .iter()
+        .filter_map(|sep| text.rfind(sep).filter(|&i| digits(&text[i + sep.len()..])))
+        .next()
+        .filter(|_| marks);
+    let (value, tail) = match split {
+        Some(i) => (text[..i].to_string(), Some(text[i..].to_string())),
+        None => (text, None),
+    };
+    let null = marks && value == "NULL";
+    view! {
+        <span class:mem-null=null>{value}</span>
+        {tail.map(|t| view! { <span class="mem-count">{t}</span> })}
+    }
 }
 
 fn down_arrow() -> impl IntoView {
