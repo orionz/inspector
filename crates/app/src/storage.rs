@@ -1184,8 +1184,10 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<TreeNode>), String>> = Cache::new();
     let mem_el = NodeRef::<leptos::html::Div>::new();
     let fan = RwSignal::new((Vec::<(f64, f64, f64, f64)>::new(), false));
-    // Lines run from the picked leaf to each of its slabs; on a new pick the
-    // slabs also get their offset from the leaf so they can spring out of it.
+    // Lines run from the picked leaf to each of its slabs, and from a picked
+    // slab through its card to its bytes. On a new pick the slabs get their
+    // offset from the leaf, and a new card its offset from its slab, so each
+    // can spring out of where it came from.
     let measure = move |spring: bool| {
         let Some(root) = mem_el.get_untracked() else { return };
         let base = root.get_bounding_client_rect();
@@ -1211,11 +1213,19 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             }
         }
         let picked = root.query_selector(".mem-slab.sel").ok().flatten();
+        let card = root.query_selector(".mem-slab-card").ok().flatten();
         let bytes = root.query_selector(".mem-bytes").ok().flatten();
-        if let (Some(p), Some(b)) = (picked, bytes) {
-            let (p, b) = (p.get_bounding_client_rect(), b.get_bounding_client_rect());
-            let x = p.left() + p.width() / 2.0 - base.left();
-            lines.push((x, p.bottom() - base.top(), x, b.top() - base.top()));
+        if let (Some(p), Some(card), Some(b)) = (picked, card, bytes) {
+            let (p, c, b) = (p.get_bounding_client_rect(), card.get_bounding_client_rect(), b.get_bounding_client_rect());
+            let px = p.left() + p.width() / 2.0 - base.left();
+            let cx = c.left() + c.width() / 2.0 - base.left();
+            lines.push((px, p.bottom() - base.top(), cx, c.top() - base.top()));
+            lines.push((cx, c.bottom() - base.top(), cx, b.top() - base.top()));
+            if card.get_attribute("style").is_none() {
+                let dx = px - cx;
+                let dy = (p.top() + p.height() / 2.0) - (c.top() + c.height() / 2.0);
+                let _ = card.set_attribute("style", &format!("--dx:{dx}px;--dy:{dy}px"));
+            }
         }
         fan.set((lines, spring));
     };
@@ -1224,17 +1234,10 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
         fan.set((vec![], false));
         request_animation_frame(move || measure(true));
     });
-    // Slabs coming back into view spring out again, so wait for them to land.
     Effect::new(move |prev: Option<()>| {
-        let picked = slab.get().is_some();
-        if prev.is_none() {
-            return;
-        }
-        if picked {
+        slab.track();
+        if prev.is_some() {
             request_animation_frame(move || measure(false));
-        } else {
-            fan.set((vec![], false));
-            set_timeout(move || measure(false), std::time::Duration::from_millis(520));
         }
     });
     move || {
@@ -1303,9 +1306,10 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             let k = slab.get()?;
             let d = &m.slabs.get(k)?.debug;
             Some(view! {
-                <div class="mem-slab-meta">
-                    <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
-                    <div class="dim mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
+                <div class="mem-slab-card">
+                    <b>{format!("Slab {k}")}</b>
+                    <div>{format!("items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</div>
+                    <div class="mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
                 </div>
             })
         };
@@ -1325,18 +1329,17 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                     let s = &m.slabs[k].debug;
                     view! {
                         <button class="mem-slab" class:sel=move || slab.get() == Some(k)
-                            class:gone=move || slab.get().is_some_and(|p| p != k)
                             title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
                             on:click=move |_| pick.set(Some((sel, node.get_untracked(), (slab.get_untracked() != Some(k)).then_some(k))))>{k}</button>
                     }
                 })
                 .collect_view();
             Some(view! {
-                <div class="mem-slabs" class:picked=move || slab.get().is_some()>
+                <div class="mem-slabs">
                     {slabs}
-                    {(hidden > 0).then(|| view! { <span class="dim more" class:gone=move || slab.get().is_some()>{format!("+{hidden} more slabs")}</span> })}
-                    {slab_meta}
+                    {(hidden > 0).then(|| view! { <span class="dim more">{format!("+{hidden} more slabs")}</span> })}
                 </div>
+                {slab_meta}
             })
         };
         let slab_detail = move || {
