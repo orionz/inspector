@@ -1128,7 +1128,7 @@ fn tree_nodes(root: &NodeDebug) -> Vec<TreeNode> {
 /// Horizontal room per leaf, squeezed between these so the tree fits about
 /// `TREE_FIT` px, and the drawn node's size, in px.
 const LEAF_W: (f64, f64) = (10.0, 44.0);
-const TREE_FIT: f64 = 960.0;
+const TREE_FIT: f64 = 600.0;
 const NODE_W: f64 = 36.0;
 /// Slab boxes shown for one leaf.
 const SLABS_SHOWN: usize = 1024;
@@ -1145,6 +1145,61 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let slab = RwSignal::new(None::<usize>);
     let hover = RwSignal::new(None::<Ids>);
     let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<TreeNode>), String>> = Cache::new();
+    let mem_el = NodeRef::<leptos::html::Div>::new();
+    let fan = RwSignal::new((Vec::<(f64, f64, f64, f64)>::new(), false));
+    // Lines run from the picked leaf to each of its slabs; on a new pick the
+    // slabs also get their offset from the leaf so they can spring out of it.
+    let measure = move |spring: bool| {
+        let Some(root) = mem_el.get_untracked() else { return };
+        let base = root.get_bounding_client_rect();
+        let leaf = root.query_selector(".mem-node.sel rect").ok().flatten();
+        let slabs = root.query_selector_all(".mem-slab").ok();
+        let (Some(leaf), Some(slabs)) = (leaf, slabs) else {
+            fan.set((vec![], false));
+            return;
+        };
+        let l = leaf.get_bounding_client_rect();
+        let (x0, y0) = (l.left() + l.width() / 2.0 - base.left(), l.bottom() - base.top());
+        let mut lines = vec![];
+        for i in 0..slabs.length() {
+            let Some(el) = slabs.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) else { continue };
+            let r = el.get_bounding_client_rect();
+            let (x1, y1) = (r.left() + r.width() / 2.0 - base.left(), r.top() - base.top());
+            if spring {
+                let dy = y0 - (y1 + r.height() / 2.0);
+                let _ = el.set_attribute("style", &format!("--dx:{}px;--dy:{dy}px;--i:{i}", x0 - x1));
+            }
+            if r.width() > 0.0 {
+                lines.push((x0, y0, x1, y1));
+            }
+        }
+        let picked = root.query_selector(".mem-slab.sel").ok().flatten();
+        let bytes = root.query_selector(".mem-bytes").ok().flatten();
+        if let (Some(p), Some(b)) = (picked, bytes) {
+            let (p, b) = (p.get_bounding_client_rect(), b.get_bounding_client_rect());
+            let x = p.left() + p.width() / 2.0 - base.left();
+            lines.push((x, p.bottom() - base.top(), x, b.top() - base.top()));
+        }
+        fan.set((lines, spring));
+    };
+    Effect::new(move |_| {
+        node.track();
+        fan.set((vec![], false));
+        request_animation_frame(move || measure(true));
+    });
+    // Slabs coming back into view spring out again, so wait for them to land.
+    Effect::new(move |prev: Option<()>| {
+        let picked = slab.get().is_some();
+        if prev.is_none() {
+            return;
+        }
+        if picked {
+            request_animation_frame(move || measure(false));
+        } else {
+            fan.set((vec![], false));
+            set_timeout(move || measure(false), std::time::Duration::from_millis(520));
+        }
+    });
     move || {
         let mem = with_chunk(app, |f, c| {
             let col = c.group(sel.ops)?.columns.get(sel.index)?.clone();
@@ -1193,89 +1248,123 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
             })
             .collect_view();
         let held = StoredValue::new_local(mem.clone());
-        let detail = move || {
+        let leaf_picked = move || held.with_value(|m| m.as_ref().as_ref().ok().and_then(|(_, n)| n.get(node.get())).is_some_and(|n| n.leaf));
+        let info = move || {
+            if leaf_picked() {
+                return None;
+            }
             let mem = held.get_value();
-            let Ok((m, nodes)) = &*mem else { return None };
-            let i = node.get();
-            let n = nodes.get(i)?;
-            let hidden = n.slabs.len().saturating_sub(SLABS_SHOWN);
-            let slabs = n.leaf.then(|| {
-                n.slabs
-                    .clone()
-                    .take(SLABS_SHOWN)
-                    .map(|k| {
-                        let s = &m.slabs[k].debug;
-                        view! {
-                            <button class="mem-slab" class:sel=move || slab.get() == Some(k)
-                                title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
-                                on:click=move |_| slab.set(Some(k))>{k}</button>
-                        }
-                    })
-                    .collect_view()
-            });
-            let slab_detail = slab.get().and_then(|k| {
-                let s = m.slabs.get(k)?;
-                let d = &s.debug;
-                let [bytes, segs, realized] = slab_tokens(s);
-                let section = move |class: &'static str, toks: Vec<Tok>, sep: &'static str, open: &'static str, close: &'static str| {
-                    let toks = toks
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, t)| {
-                            let lit = move || hover.get().zip(t.ids).is_some_and(|(h, ids)| h.0 <= ids.0 && ids.1 <= h.1);
-                            view! {
-                                {(i > 0).then_some(sep)}
-                                <span class="tok" class:linked=t.ids.is_some() class:hl=lit
-                                    on:mouseenter=move |_| hover.set(t.ids)
-                                    on:mouseleave=move |_| hover.set(None)>{t.text}</span>
-                            }
-                        })
-                        .collect_view();
-                    view! { <div class=format!("mem-sec {class}")><code>{open}{toks}{close}</code></div> }
-                };
-                let third = match (m.kind, &s.prefix) {
-                    (MemoryKind::Delta, _) => Some(section("mem-realized", realized, ", ", "[ ", " ]").into_any()),
-                    (_, Some(p)) => Some(view! { <div class="mem-sec mem-realized"><code>{p.clone()}</code></div> }.into_any()),
-                    _ => None,
-                };
-                Some(view! {
-                    <div class="mem-slab-detail">
-                        <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
-                        <div class="dim mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
-                        {section("mem-bytes", bytes, " ", "[", "]")}
-                        {down_arrow()}
-                        {section("mem-segs", segs, ", ", "[ ", " ]")}
-                        {third.map(|t| view! { {down_arrow()} {t} })}
-                    </div>
-                })
-            });
+            let Ok((_, nodes)) = &*mem else { return None };
+            let n = nodes.get(node.get())?;
             Some(view! {
-                <div class="mem-detail">
-                    <ul class="mono">{n.entries.iter().map(|e| view! { <li>{e.clone()}</li> }).collect_view()}</ul>
-                    {slabs.map(|slabs| view! {
-                        <div class="mem-slabs">
-                            {slabs}
-                            {(hidden > 0).then(|| view! { <span class="dim">{format!("+{hidden} more slabs")}</span> })}
-                        </div>
-                    })}
-                    {slab_detail}
+                <ul class="mem-info mono">{n.entries.iter().map(|e| view! { <li>{e.clone()}</li> }).collect_view()}</ul>
+            })
+        };
+        let slab_meta = move || {
+            let mem = held.get_value();
+            let Ok((m, _)) = &*mem else { return None };
+            let k = slab.get()?;
+            let d = &m.slabs.get(k)?.debug;
+            Some(view! {
+                <div class="mem-slab-meta">
+                    <b>{format!("Slab {k} · items {}..{} · {} segments · {} bytes", d.item_start, d.item_start + d.len, d.segments, d.bytes.len())}</b>
+                    <div class="dim mono">{format!("weight: {}", bare_agg(&d.weight))}</div>
                 </div>
             })
         };
+        let slab_boxes = move || {
+            if !leaf_picked() {
+                return None;
+            }
+            let mem = held.get_value();
+            let Ok((m, nodes)) = &*mem else { return None };
+            let n = nodes.get(node.get())?;
+            let hidden = n.slabs.len().saturating_sub(SLABS_SHOWN);
+            let slabs = n
+                .slabs
+                .clone()
+                .take(SLABS_SHOWN)
+                .map(|k| {
+                    let s = &m.slabs[k].debug;
+                    view! {
+                        <button class="mem-slab" class:sel=move || slab.get() == Some(k)
+                            class:gone=move || slab.get().is_some_and(|p| p != k)
+                            title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
+                            on:click=move |_| slab.update(|p| *p = if *p == Some(k) { None } else { Some(k) })>{k}</button>
+                    }
+                })
+                .collect_view();
+            Some(view! {
+                <div class="mem-slabs" class:picked=move || slab.get().is_some()>
+                    {slabs}
+                    {(hidden > 0).then(|| view! { <span class="dim more" class:gone=move || slab.get().is_some()>{format!("+{hidden} more slabs")}</span> })}
+                    {slab_meta}
+                </div>
+            })
+        };
+        let slab_detail = move || {
+            let mem = held.get_value();
+            let Ok((m, _)) = &*mem else { return None };
+            let k = slab.get()?;
+            let s = m.slabs.get(k)?;
+            let [bytes, segs, realized] = slab_tokens(s);
+            let section = move |class: &'static str, toks: Vec<Tok>, sep: &'static str, open: &'static str, close: &'static str| {
+                let toks = toks
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let lit = move || hover.get().zip(t.ids).is_some_and(|(h, ids)| h.0 <= ids.0 && ids.1 <= h.1);
+                        view! {
+                            {(i > 0).then_some(sep)}
+                            <span class="tok" class:linked=t.ids.is_some() class:hl=lit
+                                on:mouseenter=move |_| hover.set(t.ids)
+                                on:mouseleave=move |_| hover.set(None)>{t.text}</span>
+                        }
+                    })
+                    .collect_view();
+                view! { <div class=format!("mem-sec {class}")><code>{open}{toks}{close}</code></div> }
+            };
+            let third = match (m.kind, &s.prefix) {
+                (MemoryKind::Delta, _) => Some(section("mem-realized", realized, ", ", "[ ", " ]").into_any()),
+                (_, Some(p)) => Some(view! { <div class="mem-sec mem-realized"><code>{p.clone()}</code></div> }.into_any()),
+                _ => None,
+            };
+            Some(view! {
+                <div class="mem-slab-detail">
+                    {section("mem-bytes", bytes, " ", "[", "]")}
+                    {down_arrow()}
+                    {section("mem-segs", segs, ", ", "[ ", " ]")}
+                    {third.map(|t| view! { {down_arrow()} {t} })}
+                </div>
+            })
+        };
+        let fan_lines = move || {
+            fan.with(|(lines, _)| {
+                lines
+                    .iter()
+                    .map(|&(x1, y1, x2, y2)| view! { <line x1=x1 y1=y1 x2=x2 y2=y2 pathLength="1"/> })
+                    .collect_view()
+            })
+        };
         Some(view! {
-            <div class="mem">
+            <div class="mem" node_ref=mem_el>
+                <svg class="mem-fan" class:anim=move || fan.with(|f| f.1)>{fan_lines}</svg>
                 <div class="mem-head">
                     <b class="mono">{m.type_name}</b>
                     <span class="dim">{format!("{} slabs · {} nodes · depth {}", m.slabs.len(), nodes.len(), depth + 1)}</span>
                     <span class="dim">"click a node; leaves hold the slabs"</span>
                 </div>
-                <div class="mem-scroll">
-                    <svg class="mem-tree" width=width height=height>
-                        {edges}
-                        {boxes}
-                    </svg>
+                <div class="mem-top">
+                    <div class="mem-scroll" on:scroll=move |_| measure(false)>
+                        <svg class="mem-tree" width=width height=height>
+                            {edges}
+                            {boxes}
+                        </svg>
+                    </div>
+                    {info}
                 </div>
-                {detail}
+                {slab_boxes}
+                {slab_detail}
             </div>
         }
         .into_any())

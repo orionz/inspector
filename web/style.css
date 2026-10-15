@@ -499,14 +499,27 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-node:hover rect { filter: brightness(.92); }
 .mem-node.sel rect { stroke: var(--text); stroke-width: 2; }
 .mem-node text { font-size: 11px; text-anchor: middle; fill: var(--text); pointer-events: none; }
-.mem-slabs { display: grid; grid-template-columns: repeat(16, max-content); gap: 3px; margin: 8px 0; }
+.mem { position: relative; }
+.mem-fan { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.mem-fan line { stroke: var(--dim); stroke-width: 1.2; opacity: .6; }
+.mem-fan.anim line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: fan-draw .45s cubic-bezier(.3, .9, .4, 1) forwards; }
+@keyframes fan-draw { to { stroke-dashoffset: 0; } }
+.mem-top { display: flex; gap: 14px; align-items: flex-start; }
+.mem-top .mem-scroll { flex: 1 1 auto; min-width: 0; }
+.mem-info { flex: 0 1 380px; min-width: 240px; max-height: 320px; overflow: auto; margin: 0; padding: 6px 10px 6px 26px; border-left: 1px solid var(--line); font-size: 12px; }
+.mem-slabs { position: relative; display: grid; grid-template-columns: repeat(16, max-content); gap: 3px; margin: 40px 0 8px; }
+.mem-slabs.picked { display: flex; align-items: center; gap: 14px; }
+.mem-slab { position: relative; z-index: 1; }
+.mem-slab:not([style]) { opacity: 0; }
+.mem-slab[style] { animation: slab-spring .5s cubic-bezier(.3, 1.35, .5, 1) both; animation-delay: calc(var(--i) * 8ms); }
+@keyframes slab-spring { from { transform: translate(var(--dx), var(--dy)) scale(.2); opacity: 0; } }
+.mem-slab.gone, .mem-slabs .gone { display: none; }
+.mem-slab-meta { font-size: 12.5px; }
+.mem-slab-detail { margin-top: 40px; position: relative; }
 .mem-slabs > span { grid-column: 1 / -1; }
 .mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-bundle) 35%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
 .mem-slab:hover { filter: brightness(.92); }
 .mem-slab.sel { outline: 2px solid var(--text); color: var(--text); }
-.mem-slab-detail { border-top: 1px solid var(--line); padding-top: 8px; }
-.mem-detail { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12.5px; }
-.mem-detail ul { margin: 6px 0 0; padding-left: 18px; max-height: 320px; overflow: auto; }
 .mem-sec { --sec: var(--k-doc); margin-top: 8px; padding: 6px 9px; border: 1.5px solid color-mix(in srgb, var(--sec) 70%, var(--panel)); border-radius: 6px; background: color-mix(in srgb, var(--sec) 12%, var(--panel)); }
 .mem-sec code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
 .mem-segs { --sec: var(--k-change); }
@@ -552,4 +565,6 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
   .scrubber span { min-width: 0; }
   .strip-tabs button { white-space: nowrap; }
   .mem-tabs { margin-left: 50px; padding: 0 4px; }
+  .mem-top { flex-direction: column; }
+  .mem-info { max-width: none; border-left: 0; padding-left: 18px; }
 }
