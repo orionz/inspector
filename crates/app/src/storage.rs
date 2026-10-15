@@ -297,7 +297,7 @@ fn dep_warning(c: &Chunk) -> Option<&'static str> {
     match c.dep_order {
         DepOrder::InOrder => None,
         DepOrder::Late => Some("depends on a change later in the file"),
-        DepOrder::Missing => Some("depends on a change missing from the file; can't apply"),
+        DepOrder::Missing => Some("depends on a change missing from the file, directly or through other changes; can't apply"),
     }
 }
 

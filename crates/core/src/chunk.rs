@@ -129,7 +129,8 @@ pub enum DepOrder {
     InOrder,
     /// Some dependency only appears later in the file.
     Late,
-    /// Some dependency appears nowhere in the file, so the change can't apply.
+    /// Some dependency appears nowhere in the file, or can't apply itself,
+    /// so the change can't apply.
     Missing,
 }
 
@@ -299,21 +300,34 @@ impl FileReport {
 
     /// Recomputes each change's [`DepOrder`]; `inside` gives the chunk
     /// holding a dependency that isn't a change chunk or a chunk's head, or
-    /// `None` when it's nowhere in the file.
+    /// `None` when it's nowhere in the file. A chunk depending on one that
+    /// can't apply can't apply either.
     pub fn resolve_deps(&mut self, inside: impl Fn(&str) -> Option<usize>) {
         let seen = self.visible_hashes();
+        let mut holders: Vec<(usize, Vec<usize>)> = vec![];
         for c in self.chunks.iter_mut().filter(|c| has_deps(c)) {
-            c.dep_order = c
-                .facts
-                .deps
+            let found: Vec<Option<usize>> = c.facts.deps.iter().map(|d| seen.get(d).copied().or_else(|| inside(d))).collect();
+            c.dep_order = found
                 .iter()
-                .map(|d| match seen.get(d).copied().or_else(|| inside(d)) {
+                .map(|j| match *j {
                     None => DepOrder::Missing,
                     Some(j) if j > c.index => DepOrder::Late,
                     Some(_) => DepOrder::InOrder,
                 })
                 .max()
                 .unwrap_or_default();
+            holders.push((c.index, found.into_iter().flatten().collect()));
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (i, deps) in &holders {
+                let stuck = deps.iter().any(|&j| self.chunks[j].dep_order == DepOrder::Missing);
+                if stuck && self.chunks[*i].dep_order != DepOrder::Missing {
+                    self.chunks[*i].dep_order = DepOrder::Missing;
+                    changed = true;
+                }
+            }
         }
     }
 
