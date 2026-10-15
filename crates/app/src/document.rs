@@ -125,7 +125,7 @@ fn DocLevel(level: usize, crumb: Crumb) -> impl IntoView {
                             let key = if kind == ObjKind::List { format!("[{}]", e.key) } else { e.key.clone() };
                             let is_sel = sel.as_deref() == Some(key.as_str());
                             let target = match &e.value {
-                                Value::Object { id, kind, len } if !is_sel => {
+                                Value::Object { id, kind, len, .. } if !is_sel => {
                                     Some(Crumb { key: key.clone(), id: id.clone(), kind: *kind, len: *len })
                                 }
                                 _ => None,
@@ -505,7 +505,7 @@ fn DocValue(entry: Entry, level: usize, in_list: bool) -> impl IntoView {
             <span class=format!("val v-{kind}") title=entry.origin>{linkify(&text)}</span>{conflict}
         }
         .into_any(),
-        Value::Object { id, kind, len } => {
+        Value::Object { id, kind, len, inline } => {
             let key = if in_list { format!("[{}]", entry.key) } else { entry.key.clone() };
             let crumb = Crumb { key, id, kind, len };
             let sel = {
@@ -514,7 +514,10 @@ fn DocValue(entry: Entry, level: usize, in_list: bool) -> impl IntoView {
             };
             view! {
                 <button class="obj-chip" class:sel=sel title=entry.origin
-                    on:click=move |_| open_at(app, level, Some(crumb.clone()))>{obj_label(kind, len)}</button>
+                    on:click=move |_| open_at(app, level, Some(crumb.clone()))>{match inline {
+                        Some(text) => format!("text {text:?}"),
+                        None => obj_label(kind, len),
+                    }}</button>
                 {conflict}
             }
             .into_any()

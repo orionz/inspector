@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+/// Text objects this short show their characters in place of a summary.
+const INLINE_TEXT: usize = 40;
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ObjKind {
     Map,
@@ -38,7 +41,8 @@ impl From<ObjType> for ObjKind {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub enum Value {
     Scalar { text: String, kind: String },
-    Object { id: String, kind: ObjKind, len: usize },
+    /// `inline` holds a text object's characters when there are few enough to show in place.
+    Object { id: String, kind: ObjKind, len: usize, inline: Option<String> },
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -190,10 +194,11 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
     };
     let resp = match req {
         Req::Page { obj, step, limit, tombstones } => {
+            let heads = heads_at(step);
             let (entries, total) = if tombstones {
                 m.page_with_tombstones(&obj_of(&obj), step, limit)
             } else {
-                let page = m.page(&obj_of(&obj), heads_at(step).as_deref(), 0, limit);
+                let page = m.page(&obj_of(&obj), heads.as_deref(), 0, limit);
                 (page.entries.into_iter().map(|e| (e, false)).collect(), page.total)
             };
             let entries = entries
@@ -204,7 +209,12 @@ fn handle(held: &mut Held, req: Req, bytes: Option<Vec<u8>>) -> (Resp, Option<Ve
                     id: e.op_id.clone(),
                     value: match e.value {
                         NodeValue::Scalar { text, kind } => Value::Scalar { text, kind: kind.into() },
-                        NodeValue::Object { id, ty, len } => Value::Object { id: id.to_string(), kind: ty.into(), len },
+                        NodeValue::Object { id, ty, len } => Value::Object {
+                            inline: (ty == ObjType::Text && len <= INLINE_TEXT).then(|| m.text(&id, heads.as_deref())),
+                            id: id.to_string(),
+                            kind: ty.into(),
+                            len,
+                        },
                     },
                     key: e.key,
                     conflict: e.conflict,

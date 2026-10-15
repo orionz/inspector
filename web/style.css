@@ -505,5 +505,5 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-slab-detail { border-top: 1px solid var(--line); padding-top: 8px; }
 .mem-detail { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12.5px; }
 .mem-detail ul { margin: 6px 0 0; padding-left: 18px; max-height: 320px; overflow: auto; }
-.mem-line { display: grid; grid-template-columns: 80px 1fr; gap: 8px; margin-top: 6px; }
-.mem-line code { white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+.mem-line { margin-top: 6px; }
+.mem-line code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
