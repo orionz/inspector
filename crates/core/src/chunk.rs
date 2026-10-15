@@ -14,7 +14,7 @@ pub enum ChunkKind {
     Change,
     Compressed,
     BundleV0,
-    ChangeSet,
+    Bundle,
     Unknown(u8),
 }
 
@@ -25,7 +25,7 @@ impl ChunkKind {
             1 => Self::Change,
             2 => Self::Compressed,
             3 => Self::BundleV0,
-            4 => Self::ChangeSet,
+            4 => Self::Bundle,
             x => Self::Unknown(x),
         }
     }
@@ -36,7 +36,7 @@ impl ChunkKind {
             Self::Change => "Change".into(),
             Self::Compressed => "Compressed change".into(),
             Self::BundleV0 => "Bundle v0".into(),
-            Self::ChangeSet => "Change set".into(),
+            Self::Bundle => "Bundle".into(),
             Self::Unknown(b) => format!("Unknown ({b})"),
         }
     }
@@ -47,8 +47,8 @@ impl ChunkKind {
             Self::Document => "doc",
             Self::Change => "change",
             Self::Compressed => "compressed",
-            Self::BundleV0 => "bundle",
-            Self::ChangeSet => "changeset",
+            Self::BundleV0 => "bundle-v0",
+            Self::Bundle => "bundle",
             Self::Unknown(_) => "unknown",
         }
     }
@@ -105,8 +105,8 @@ pub struct ChunkFacts {
     pub deps: Vec<String>,
     /// Change chunks only.
     pub change: Option<ChangeHeader>,
-    /// Change set prefix entries, as `(label, count)`.
-    pub change_set_prefix: Vec<(&'static str, usize)>,
+    /// Bundle prefix entries, as `(label, count)`.
+    pub bundle_prefix: Vec<(&'static str, usize)>,
     pub extra_bytes: usize,
     pub head_indexes: Vec<u64>,
 }
@@ -246,14 +246,14 @@ fn is_change(c: &Chunk) -> bool {
 }
 
 fn has_deps(c: &Chunk) -> bool {
-    (is_change(c) || c.kind == ChunkKind::ChangeSet) && c.error.is_none()
+    (is_change(c) || c.kind == ChunkKind::Bundle) && c.error.is_none()
 }
 
-/// The hashes that say what a chunk delivers: a change chunk's own, a change set's heads.
+/// The hashes that say what a chunk delivers: a change chunk's own, a bundle's heads.
 fn delivers(c: &Chunk) -> Vec<String> {
     match c.kind {
         _ if is_change(c) => vec![c.hash_hex()],
-        ChunkKind::ChangeSet => c.facts.heads.clone(),
+        ChunkKind::Bundle => c.facts.heads.clone(),
         _ => vec![],
     }
 }
@@ -338,7 +338,7 @@ impl FileReport {
         out
     }
 
-    /// Flags the change and change set chunks that deliver nothing new:
+    /// Flags the change and bundle chunks that deliver nothing new:
     /// `holder` gives the first chunk other than a change chunk holding a change.
     pub fn mark_redundant(&mut self, holder: impl Fn(&str) -> Option<usize>) {
         let seen = self.visible_hashes();
@@ -405,7 +405,7 @@ fn parse_chunk(file: &[u8], start: usize, index: usize) -> Result<Chunk> {
         ChunkKind::BundleV0 => {
             parse_column_section(&mut chunk, body, body_start, ColContext::BundleV0Changes)
         }
-        ChunkKind::ChangeSet => parse_change_set(&mut chunk, body, body_start),
+        ChunkKind::Bundle => parse_bundle(&mut chunk, body, body_start),
         ChunkKind::Unknown(_) => Ok(()),
     };
     if let Err(e) = result {
@@ -553,7 +553,7 @@ fn parse_compressed(chunk: &mut Chunk, body: &[u8], base: usize) -> Result<()> {
     parse_change(chunk, &inflated, None)
 }
 
-/// The column section shared by change sets and v0 bundles: deps, actors,
+/// The column section shared by bundles and v0 bundles: deps, actors,
 /// change columns and op columns.
 fn parse_column_section(
     chunk: &mut Chunk,
@@ -596,14 +596,14 @@ fn parse_column_section(
     ));
     chunk.groups.push(ColumnGroup::new(
         "Op columns",
-        ColContext::ChangeSetOps,
-        build_columns(ColContext::ChangeSetOps, &op_meta, op_data, Some(op_start))?,
+        ColContext::BundleOps,
+        build_columns(ColContext::BundleOps, &op_meta, op_data, Some(op_start))?,
         meta_entry_len(&op_meta),
     ));
     Ok(())
 }
 
-fn parse_change_set(chunk: &mut Chunk, body: &[u8], base: usize) -> Result<()> {
+fn parse_bundle(chunk: &mut Chunk, body: &[u8], base: usize) -> Result<()> {
     let mut r = Reader::new(body, base);
     let s = r.pos();
     let prefix_actors = read_actors(&mut r)?;
@@ -635,11 +635,11 @@ fn parse_change_set(chunk: &mut Chunk, body: &[u8], base: usize) -> Result<()> {
     }
     counts.push(("dep ids", n_deps));
     counts.push(("prefix actors", prefix_actors.len()));
-    chunk.facts.change_set_prefix = counts;
+    chunk.facts.bundle_prefix = counts;
     section(chunk, "fragment prefix", SectionKind::Metadata, s..r.pos());
     let rest_start = r.pos();
     let rest = r.rest();
-    parse_column_section(chunk, rest, rest_start, ColContext::ChangeSetChanges)
+    parse_column_section(chunk, rest, rest_start, ColContext::BundleChanges)
 }
 
 #[cfg(test)]
@@ -683,6 +683,6 @@ mod tests {
         let count = |o| report.chunks.iter().filter(|c| c.dep_order == o).count();
         assert_eq!((count(DepOrder::Late), count(DepOrder::Missing)), (2, 2));
         let report = parse_file(&corpus("text-next-save-plus-incrementals.automerge"));
-        assert!(report.chunks.iter().all(|c| c.kind == ChunkKind::ChangeSet));
+        assert!(report.chunks.iter().all(|c| c.kind == ChunkKind::Bundle));
     }
 }

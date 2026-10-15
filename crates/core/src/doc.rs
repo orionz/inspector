@@ -902,7 +902,7 @@ pub fn chunk_changes(file: &[u8], chunk: &Chunk) -> Result<Vec<automerge::Change
         ChunkKind::Change | ChunkKind::Compressed => {
             vec![automerge::Change::from_bytes(bytes.to_vec()).map_err(|e| e.to_string())?]
         }
-        ChunkKind::ChangeSet => automerge::ChangeSet::try_from(bytes)
+        ChunkKind::Bundle => automerge::Bundle::try_from(bytes)
             .map_err(|e| e.to_string())?
             .to_changes()
             .map_err(|e| e.to_string())?,

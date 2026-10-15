@@ -14,8 +14,8 @@
   --k-doc: #7aa2ff;
   --k-change: #5fd3b5;
   --k-compressed: #b48cf2;
-  --k-bundle: #f0b45a;
-  --k-changeset: #b8d94a;
+  --k-bundle-v0: #f0b45a;
+  --k-bundle: #b8d94a;
   --k-unknown: #6b7280;
   --k-late: #ff9a3c;
   --k-redundant: #e535d6;
@@ -170,7 +170,7 @@ tr.sel, .change-row.sel { background: var(--sel); }
   color: #10131a; line-height: 17px;
 }
 .k-doc { background: var(--k-doc); } .k-change { background: var(--k-change); } .k-compressed { background: var(--k-compressed); }
-.k-bundle { background: var(--k-bundle); } .k-changeset { background: var(--k-changeset); } .k-unknown { background: var(--k-unknown); }
+.k-bundle-v0 { background: var(--k-bundle-v0); } .k-bundle { background: var(--k-bundle); } .k-unknown { background: var(--k-unknown); }
 .k-late { background: var(--k-late); } .k-redundant { background: var(--k-redundant); } .k-missing { background: var(--k-missing); }
 .s-header { background: var(--s-header); } .s-metadata { background: var(--s-metadata); } .s-colmeta { background: var(--s-colmeta); }
 .s-changecols { background: var(--s-changecols); } .s-opcols { background: var(--s-opcols); } .s-suffix { background: var(--s-suffix); } .s-deflated { background: var(--s-deflated); }
@@ -191,8 +191,8 @@ tr.sel, .change-row.sel { background: var(--sel); }
 .stack { position: relative; cursor: pointer; }
 .blk, .deck-panel { --kc: var(--k-unknown); }
 .blk.k-doc, .deck-panel.k-doc { --kc: var(--k-doc); } .blk.k-change, .deck-panel.k-change { --kc: var(--k-change); }
-.blk.k-compressed, .deck-panel.k-compressed { --kc: var(--k-compressed); } .blk.k-bundle, .deck-panel.k-bundle { --kc: var(--k-bundle); }
-.blk.k-changeset, .deck-panel.k-changeset { --kc: var(--k-changeset); }
+.blk.k-compressed, .deck-panel.k-compressed { --kc: var(--k-compressed); } .blk.k-bundle-v0, .deck-panel.k-bundle-v0 { --kc: var(--k-bundle-v0); }
+.blk.k-bundle, .deck-panel.k-bundle { --kc: var(--k-bundle); }
 .blk.k-late, .deck-panel.k-late { --kc: var(--k-late); } .blk.k-redundant, .deck-panel.k-redundant, .dep-warning.k-redundant { --kc: var(--k-redundant); } .blk.k-missing, .deck-panel.k-missing { --kc: var(--k-missing); }
 .blk, .deck-panel { --fc: var(--kc); }
 .st-late { --fc: var(--k-late); } .st-redundant { --fc: var(--k-redundant); } .st-missing { --fc: var(--k-missing); }
@@ -383,7 +383,7 @@ pre.json { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 
 .sep { color: var(--dim); margin-left: -4px; }
 .val { overflow: hidden; text-overflow: ellipsis; }
 .v-str { color: var(--ok); } .v-int, .v-uint, .v-f64 { color: var(--t-uint); } .v-counter { color: var(--t-actor); }
-.v-bool { color: var(--t-bool); } .v-null { color: var(--dim); } .v-timestamp { color: var(--k-changeset); } .v-bytes { color: var(--t-raw); }
+.v-bool { color: var(--t-bool); } .v-null { color: var(--dim); } .v-timestamp { color: var(--k-bundle); } .v-bytes { color: var(--t-raw); }
 .vtype, .objtype { color: var(--dim); font-size: 11px; }
 .conflict { color: var(--t-actor); }
 .text-obj { margin: 2px 0 6px; }
@@ -526,7 +526,7 @@ dl.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: no
 .mem-slab-meta { font-size: 12.5px; }
 .mem-slab-detail { margin-top: 40px; position: relative; }
 .mem-slabs > span { grid-column: 1 / -1; }
-.mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-bundle) 35%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
+.mem-slab { min-width: 30px; height: 22px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--k-bundle-v0) 35%, var(--panel)); font: 10px var(--mono); color: var(--dim); cursor: pointer; }
 .mem-slab:hover { filter: brightness(.92); }
 .mem-slab.sel { outline: 2px solid var(--text); color: var(--text); }
 .mem-sec { --sec: var(--k-doc); margin-top: 8px; padding: 6px 9px; border: 1.5px solid color-mix(in srgb, var(--sec) 70%, var(--panel)); border-radius: 6px; background: color-mix(in srgb, var(--sec) 12%, var(--panel)); }

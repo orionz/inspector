@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use am_inspect::{parse_structure, FileReport};
 use leptos::prelude::*;
 
+use crate::url::{Params, Source};
 use crate::worker::{self, ObjKind, Req, Resp, Summary};
 
 #[derive(Clone)]
@@ -102,6 +103,16 @@ pub struct AppState {
     pub fetched: RwSignal<Option<String>>,
     /// Whether a raw column shows hexane's in-memory layout rather than its stored bytes.
     pub in_memory: RwSignal<bool>,
+    /// In the in-memory view of a column, the index node picked and the slab picked under it.
+    pub mem_pick: RwSignal<Option<(ColumnRef, usize, Option<usize>)>>,
+    /// Where the open file came from.
+    pub source: RwSignal<Option<Source>>,
+    /// A link's UI state, applied once the file it names is open.
+    pub pending: StoredValue<Option<(Source, Params)>>,
+    /// A link's history step, applied once the document loads.
+    pub pending_step: StoredValue<Option<usize>>,
+    /// Set while back or forward is restoring a state, so it isn't pushed again.
+    pub navigating: StoredValue<bool>,
 }
 
 impl AppState {
@@ -130,6 +141,11 @@ impl AppState {
             tombstones: RwSignal::new(false),
             fetched: RwSignal::new(None),
             in_memory: RwSignal::new(false),
+            mem_pick: RwSignal::new(None),
+            source: RwSignal::new(None),
+            pending: StoredValue::new(None),
+            pending_step: StoredValue::new(None),
+            navigating: StoredValue::new(false),
         };
         state
     }
@@ -150,18 +166,19 @@ impl AppState {
         self.saved.set(None);
         self.load_ms.0.set(None);
         self.load_ms.1.set(None);
+        self.source.set(None);
         self.file.set(None);
     }
 
     /// Parses the file in two phases so the storage view appears before the
     /// (much slower) full document load finishes.
-    pub fn open(self, name: String, bytes: Vec<u8>) {
-        self.open_marked(name, bytes, HashSet::new());
+    pub fn open(self, name: String, bytes: Vec<u8>, source: Source) {
+        self.open_marked(name, bytes, HashSet::new(), source);
     }
 
     /// Like [`open`](Self::open), flagging the chunks that start at
     /// `redundant` byte offsets as only repeating changes held elsewhere.
-    pub fn open_marked(self, name: String, bytes: Vec<u8>, redundant: HashSet<usize>) {
+    pub fn open_marked(self, name: String, bytes: Vec<u8>, redundant: HashSet<usize>, source: Source) {
         self.status
             .set(Some(format!("Parsing {name} ({})…", crate::fmt::bytes(bytes.len()))));
         set_timeout(
@@ -183,6 +200,8 @@ impl AppState {
                 self.saved.set(None);
                 self.load_ms.0.set(None);
                 self.load_ms.1.set(None);
+                self.mem_pick.set(None);
+                self.source.set(Some(source));
                 self.file.set(Some(Rc::new(Loaded { name, bytes, report })));
                 self.status.set(Some("Loading document history…".into()));
                 let hidden = self.file.with_untracked(|f| f.as_ref().map(|f| f.report.hidden_deps()).unwrap_or_default());
@@ -227,7 +246,9 @@ impl AppState {
                         let mut report = parse_structure(&bytes);
                         resolve_deps(&mut report, &sum.saved_known_deps.iter().map(String::as_str).collect());
                         self.saved.set(Some(Rc::new(Loaded { name: "next::Automerge::save()".into(), bytes, report })));
-                        self.step.set(sum.changes);
+                        let step = self.pending_step.get_value();
+                        self.pending_step.set_value(None);
+                        self.step.set(step.unwrap_or(sum.changes));
                         leptos::task::spawn_local(async move {
                             if let Some((Resp::Ms(ms), _)) = worker::call(None, Req::SavedLoadMs, None).await {
                                 self.load_ms.1.set(Some(ms));

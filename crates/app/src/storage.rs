@@ -187,6 +187,7 @@ fn band_background(chunks: &[Chunk]) -> String {
 }
 
 fn select_chunk(app: AppState, index: usize) {
+    app.mem_pick.set(None);
     app.chunk.set(Some(index));
     app.part.set(None);
     app.column.set(None);
@@ -194,6 +195,7 @@ fn select_chunk(app: AppState, index: usize) {
 }
 
 fn close_chunk(app: AppState) {
+    app.mem_pick.set(None);
     app.chunk.set(None);
     app.part.set(None);
     app.column.set(None);
@@ -1175,8 +1177,9 @@ const LEVEL_H: f64 = 64.0;
 #[component]
 fn MemoryView(sel: ColumnRef) -> impl IntoView {
     let app = expect_context::<AppState>();
-    let node = RwSignal::new(0usize);
-    let slab = RwSignal::new(None::<usize>);
+    let pick = app.mem_pick;
+    let node = Memo::new(move |_| pick.with(|p| p.filter(|p| p.0 == sel).map_or(0, |p| p.1)));
+    let slab = Memo::new(move |_| pick.with(|p| p.filter(|p| p.0 == sel).and_then(|p| p.2)));
     let hover = RwSignal::new(None::<Ids>);
     let cache: Cache<(usize, usize, ColumnRef), Result<(ColumnMemory, Vec<TreeNode>), String>> = Cache::new();
     let mem_el = NodeRef::<leptos::html::Div>::new();
@@ -1273,7 +1276,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                 let label = (w >= 24.0).then(|| own.to_string());
                 view! {
                     <g class="mem-node" class:sel=move || node.get() == i
-                        on:click=move |_| { node.set(i); slab.set(None); }>
+                        on:click=move |_| pick.set(Some((sel, i, None)))>
                         <title>{if n.leaf { format!("leaf · {own} slabs") } else { format!("internal node · {} children · no slabs of its own", n.entries.len()) }}</title>
                         <rect x=x - w / 2.0 y=y width=w height=NODE_H rx=if w < 12.0 { 2 } else { 5 }/>
                         <text x=x y=y + NODE_H / 2.0 + 4.0>{label}</text>
@@ -1324,7 +1327,7 @@ fn MemoryView(sel: ColumnRef) -> impl IntoView {
                         <button class="mem-slab" class:sel=move || slab.get() == Some(k)
                             class:gone=move || slab.get().is_some_and(|p| p != k)
                             title=format!("slab {k}: items {}..{}, {} segments, {} bytes", s.item_start, s.item_start + s.len, s.segments, s.bytes.len())
-                            on:click=move |_| slab.update(|p| *p = if *p == Some(k) { None } else { Some(k) })>{k}</button>
+                            on:click=move |_| pick.set(Some((sel, node.get_untracked(), (slab.get_untracked() != Some(k)).then_some(k))))>{k}</button>
                     }
                 })
                 .collect_view();

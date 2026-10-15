@@ -251,7 +251,7 @@ fn main() {
     );
 
     let mut next = text_doc(40).into_next();
-    write(&dir, "text-next-changeset.automerge", &next.save());
+    write(&dir, "text-next-bundle.automerge", &next.save());
 
     write(
         &dir,
@@ -293,7 +293,7 @@ mod edit_trace {
     /// followed by 5% incremental saves, one written out of order, one from
     /// an unrelated document, one repeating changes the document chunk
     /// already holds, and the last keystrokes as loose change chunks; then
-    /// those incrementals as next-API change sets; and the whole history as
+    /// those incrementals as next-API bundles; and the whole history as
     /// the fragments and loose commits subduction would store.
     pub struct Fixtures {
         pub incrementals: Vec<u8>,
@@ -341,7 +341,7 @@ mod edit_trace {
             let step = n / 20;
             let first = step * 8;
             let marks: Vec<usize> = (first..n - LOOSE).step_by(step).skip(1).chain([n - LOOSE]).collect();
-            let (mut legacy, mut changesets) = (
+            let (mut legacy, mut bundles) = (
                 Saves { doc: vec![], incrementals: vec![], redundant: vec![] },
                 Saves { doc: vec![], incrementals: vec![], redundant: vec![] },
             );
@@ -360,26 +360,26 @@ mod edit_trace {
                 if done == first {
                     legacy.doc = doc.save();
                     legacy.redundant = doc.save_after(&at_38);
-                    changesets.redundant = nx.save_after(&next_at_38).unwrap();
+                    bundles.redundant = nx.save_after(&next_at_38).unwrap();
                     doc.save_incremental();
                     nx.save_incremental();
                 }
                 if marks.contains(&done) {
                     legacy.incrementals.push(doc.save_incremental());
-                    changesets.incrementals.push(nx.save_incremental());
+                    bundles.incrementals.push(nx.save_incremental());
                 }
                 if done > n - LOOSE {
                     loose.extend(doc.get_last_local_change().unwrap().raw_bytes());
                 }
             }
-            changesets.doc = legacy.doc.clone();
+            bundles.doc = legacy.doc.clone();
             assert_eq!(legacy.incrementals.len(), 12);
 
             let fragments = doc.fragments(..);
-            let fragments = doc.change_sets_for_fragments(fragments).unwrap().concat();
+            let fragments = doc.bundles_for_fragments(fragments).unwrap().concat();
             Self {
                 incrementals: layout(legacy, foreign_legacy(), &loose),
-                next_incrementals: layout(changesets, foreign_next(), &loose),
+                next_incrementals: layout(bundles, foreign_next(), &loose),
                 fragments,
             }
         }

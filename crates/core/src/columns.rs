@@ -71,46 +71,46 @@ pub enum ColContext {
     DocOps,
     DocChanges,
     ChangeOps,
-    ChangeSetOps,
-    ChangeSetChanges,
+    BundleOps,
+    BundleChanges,
     BundleV0Changes,
 }
 
 impl ColContext {
     pub fn is_ops(&self) -> bool {
-        matches!(self, Self::DocOps | Self::ChangeOps | Self::ChangeSetOps)
+        matches!(self, Self::DocOps | Self::ChangeOps | Self::BundleOps)
     }
 
     /// The base name of the logical field a column id belongs to.
     pub fn field_name(&self, id: u32) -> Option<&'static str> {
         use ColContext::*;
         Some(match (self, id) {
-            (DocOps | ChangeOps | ChangeSetOps, 0) => "obj",
-            (DocOps | ChangeOps | ChangeSetOps, 1) => "key",
-            (DocOps | ChangeSetOps, 2) => "id",
-            (DocOps | ChangeOps | ChangeSetOps, 3) => "insert",
-            (DocOps | ChangeOps | ChangeSetOps, 4) => "action",
-            (DocOps | ChangeOps | ChangeSetOps, 5) => "value",
-            (ChangeOps | ChangeSetOps, 7) => "pred",
-            (DocOps | ChangeSetOps, 8) => "succ",
-            (DocOps | ChangeOps | ChangeSetOps, 9) => "expand",
-            (DocOps | ChangeOps | ChangeSetOps, 10) => "mark_name",
-            (ChangeSetOps, 11) => "id_ctr_inverse",
-            (ChangeSetOps, 12) => "hint",
-            (DocChanges, 0) | (ChangeSetChanges | BundleV0Changes, 0) => "change",
+            (DocOps | ChangeOps | BundleOps, 0) => "obj",
+            (DocOps | ChangeOps | BundleOps, 1) => "key",
+            (DocOps | BundleOps, 2) => "id",
+            (DocOps | ChangeOps | BundleOps, 3) => "insert",
+            (DocOps | ChangeOps | BundleOps, 4) => "action",
+            (DocOps | ChangeOps | BundleOps, 5) => "value",
+            (ChangeOps | BundleOps, 7) => "pred",
+            (DocOps | BundleOps, 8) => "succ",
+            (DocOps | ChangeOps | BundleOps, 9) => "expand",
+            (DocOps | ChangeOps | BundleOps, 10) => "mark_name",
+            (BundleOps, 11) => "id_ctr_inverse",
+            (BundleOps, 12) => "hint",
+            (DocChanges, 0) | (BundleChanges | BundleV0Changes, 0) => "change",
             (DocChanges, 1) => "max_op",
             (DocChanges, 2) => "time",
             (DocChanges, 3) => "message",
             (DocChanges, 4) => "deps",
             (DocChanges, 5) => "extra",
             (DocChanges, 6) => "hash (legacy)",
-            (ChangeSetChanges, 1) => "num_ops",
+            (BundleChanges, 1) => "num_ops",
             (BundleV0Changes, 1) => "start_op",
-            (ChangeSetChanges | BundleV0Changes, 2) => "max_op",
-            (ChangeSetChanges | BundleV0Changes, 3) => "time",
-            (ChangeSetChanges | BundleV0Changes, 4) => "message",
-            (ChangeSetChanges | BundleV0Changes, 5) => "deps",
-            (ChangeSetChanges | BundleV0Changes, 6) => "extra",
+            (BundleChanges | BundleV0Changes, 2) => "max_op",
+            (BundleChanges | BundleV0Changes, 3) => "time",
+            (BundleChanges | BundleV0Changes, 4) => "message",
+            (BundleChanges | BundleV0Changes, 5) => "deps",
+            (BundleChanges | BundleV0Changes, 6) => "extra",
             _ => return None,
         })
     }

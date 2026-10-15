@@ -10,7 +10,7 @@ The three views sit on folder tabs above the file area.
 
 **Load tab**
 - The file as a vertical stack of chunks, coloured by type (document, change,
-  compressed change, change set, v0 bundle). Block height follows chunk size,
+  compressed change, bundle, v0 bundle). Block height follows chunk size,
   on a log scale when sizes differ by more than 8×; runs of chunks around 1%
   of the file or smaller are drawn as 3px bands, one per chunk. Hovering
   anywhere zooms out a panel for the chunk under the cursor (bytes, share of
@@ -130,19 +130,23 @@ the automerge repository:
 
 | file | chunks |
 |------|--------|
+| `edit-trace-incrementals` | the editing trace, a change per keystroke: `save()` at 40%, then 5% `save_incremental()`s (one out of order, one from another document, one redundant) and loose changes |
+| `edit-trace-fragments` | the same history as subduction stores it: `next` API fragments and loose commits as bundles |
+| `edit-trace-next-incrementals` | the first layout with its incrementals as `next` API bundles |
 | `todo-save-plus-incrementals` | `save()` then 4 × `save_incremental()`: document + change chunks |
 | `text-save-plus-incrementals` | the same pattern on collaborative rich text |
-| `text-next-save-plus-incrementals` | `next` API: change-set save + incremental change sets |
-| `text-next-changeset` | a whole document as one change set |
+| `text-next-save-plus-incrementals` | `next` API: bundle save + incremental bundles |
+| `text-next-bundle` | a whole document as one bundle |
 | `todo-doc`, `text-doc` | single document chunks |
 | `todo-changes`, `text-changes` | concatenated change chunks |
 | `two_change_chunks_compressed` | deflate-compressed change chunks |
-| `bundle-v0-3.3.2` | the frozen bundle format written by automerge 3.3.x |
+| `bundle-v0-3.3.2` | the frozen v0 bundle format written by automerge 3.3.x |
 | `essay.amrg` | real doc chunk + 449 change chunks (263k changes) |
 | `monday-meeting-notes`, `godot-modeled` | real-world documents with deflated columns |
 | `64bit_obj_id_change` | invalid change (error handling) |
 
-Regenerate the generated ones with `cargo run -p corpus --release -- corpus`.
+Regenerate the generated ones with `cargo run -p corpus --release -- corpus`;
+the edit trace fixtures read `../automerge/rust/edit-trace/edits.json`.
 
 ## Deploying to GitHub Pages
 

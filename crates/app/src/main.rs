@@ -3,6 +3,7 @@ mod fmt;
 mod patchwork;
 mod state;
 mod storage;
+mod url;
 mod worker;
 
 use leptos::html;
@@ -15,6 +16,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use state::{AppState, Loaded, Tab};
+use url::Source;
 
 const APP_VERSION: &str = match option_env!("APP_VERSION") {
     Some(v) => v,
@@ -28,15 +30,15 @@ const APP_COMMIT: &str = match option_env!("APP_COMMIT") {
 const SAMPLES: &[(&str, &str)] = &[
     ("edit-trace-incrementals.automerge", "editing trace, a change per keystroke: save() at 40%, then 5% incrementals — one out of order, one from another document, one redundant — and loose changes"),
     ("edit-trace-fragments.automerge", "the same history as subduction stores it: next API fragments and loose commits"),
-    ("edit-trace-next-incrementals.automerge", "the same layout as the first, its incrementals written as next API change sets"),
+    ("edit-trace-next-incrementals.automerge", "the same layout as the first, its incrementals written as next API bundles"),
     ("todo-save-plus-incrementals.automerge", "save() then 104 × save_incremental(): bulk imports between runs of single edits"),
-    ("text-next-save-plus-incrementals.automerge", "next API: change-set save + incremental change sets"),
-    ("text-next-changeset.automerge", "whole document as one change set chunk"),
+    ("text-next-save-plus-incrementals.automerge", "next API: bundle save + incremental bundles"),
+    ("text-next-bundle.automerge", "whole document as one bundle chunk"),
     ("text-doc.automerge", "collaborative rich text, 3 authors, marks"),
     ("todo-doc.automerge", "maps, lists, counters, all scalar types"),
     ("text-changes.automerge", "121 individual change chunks"),
     ("two_change_chunks_compressed.automerge", "deflate-compressed change chunks"),
-    ("bundle-v0-3.3.2.automerge", "frozen bundle format from automerge 3.3.2"),
+    ("bundle-v0-3.3.2.automerge", "frozen v0 bundle format from automerge 3.3.2"),
     ("monday-meeting-notes.automerge", "real-world doc, 15k changes, deflated columns"),
     ("essay.amrg", "real-world doc chunk + 449 change chunks, 263k changes"),
     ("godot-modeled.amrg", "real-world doc, Godot scene model"),
@@ -69,18 +71,35 @@ fn open_file(app: AppState, file: web_sys::File) {
     let name = file.name();
     spawn_local(async move {
         match read_file(file).await {
-            Ok(bytes) => app.open(name, bytes),
+            Ok(bytes) => {
+                let source = url::file_source(name.clone(), &bytes);
+                let wanted = app.pending.with_value(|p| match p {
+                    Some((Source::File { sha, name }, _)) => Some((sha.clone(), name.clone())),
+                    _ => None,
+                });
+                if let (Some((sha, wanted_name)), Source::File { sha: got, .. }) = (wanted, &source) {
+                    if sha != *got {
+                        app.pending.set_value(None);
+                        app.fetched.set(Some(format!(
+                            "The link was for {wanted_name} (SHA-256 {sha}…), but {name} is {got}…, so it opens at the start."
+                        )));
+                        app.open(name, bytes, source);
+                        return;
+                    }
+                }
+                app.open(name, bytes, source)
+            }
             Err(e) => app.status.set(Some(format!("Could not read file: {e}"))),
         }
     });
 }
 
-fn open_sample(app: AppState, name: &'static str) {
+fn open_sample(app: AppState, name: String) {
     app.fetched.set(None);
     app.status.set(Some(format!("Fetching {name}…")));
     spawn_local(async move {
         match fetch_bytes(format!("samples/{name}")).await {
-            Ok(bytes) => app.open(name.to_string(), bytes),
+            Ok(bytes) => app.open(name.clone(), bytes, Source::Sample(name)),
             Err(e) => app.status.set(Some(format!("Could not fetch {name}: {e}"))),
         }
     });
@@ -92,12 +111,25 @@ fn open_link(app: AppState, link: String) {
         app.status.set(Some("That link has no automerge:… document id in it".into()));
         return;
     };
-    let title = patchwork::title(&link);
-    let hash = match &title {
-        Some(t) => format!("doc=automerge:{id}&title={}", js_sys::encode_uri_component(t)),
-        None => format!("doc=automerge:{id}"),
-    };
-    let _ = window().location().set_hash(&hash);
+    open_doc(app, id, patchwork::title(&link));
+}
+
+/// Opens what the source names; a file from disk can only be asked for.
+fn open_source(app: AppState, source: Source) {
+    match source {
+        Source::Sample(name) => open_sample(app, name),
+        Source::Doc { id, title } => open_doc(app, id, title),
+        Source::File { sha, name } => {
+            app.close();
+            app.status.set(Some(format!(
+                "This link shows {name}, a file opened from disk (SHA-256 {sha}…). Links can't carry the file itself: open or drop it here to see the view the link points to."
+            )));
+        }
+    }
+}
+
+fn open_doc(app: AppState, id: String, title: Option<String>) {
+    let source = Source::Doc { id: id.clone(), title: title.clone() };
     let name = title.unwrap_or_else(|| format!("automerge:{id}"));
     app.status.set(Some(format!("Fetching {name} from {}…", patchwork::SERVER)));
     spawn_local(async move {
@@ -119,7 +151,7 @@ fn open_link(app: AppState, link: String) {
                     fmt::count_exact(f.commits),
                     fmt::count_exact(redundant.len())
                 )));
-                app.open_marked(name, bytes, redundant);
+                app.open_marked(name, bytes, redundant, source);
             }
             Err(e) => app.status.set(Some(format!("Could not fetch {name}: {e}"))),
         }
@@ -160,7 +192,8 @@ fn Header() -> impl IntoView {
             <div class="brand">
                 <button class="home" title="Back to the start page" on:click=move |_| {
                     if let Some(i) = input.get() { i.set_value(""); }
-                    let _ = window().history().and_then(|h| h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&window().location().pathname().unwrap_or_default())));
+                    app.pending.set_value(None);
+                    app.status.set(None);
                     app.close();
                 }>
                     <svg viewBox="0 0 32 32" class="logo"><use href="#logo"/></svg>
@@ -187,7 +220,7 @@ fn Welcome() -> impl IntoView {
                 <svg viewBox="0 0 32 32" class="logo big"><use href="#logo"/></svg>
                 <h1>"Drop an automerge file anywhere"</h1>
                 <p>"or use " <b>"Open file…"</b> ". Everything runs locally in your browser; nothing is uploaded."</p>
-                <p class="dim">"Documents, change chunks, compressed changes, change sets and v0 bundles — concatenated in any order."</p>
+                <p class="dim">"Documents, change chunks, compressed changes, bundles and v0 bundles — concatenated in any order."</p>
             </div>
             <form class="link-form" on:submit=move |ev| {
                 ev.prevent_default();
@@ -204,7 +237,7 @@ fn Welcome() -> impl IntoView {
                     .map(|(name, desc)| {
                         view! {
                             <li>
-                                <button class="link" on:click=move |_| open_sample(app, name)>{*name}</button>
+                                <button class="link" on:click=move |_| { app.pending.set_value(None); open_sample(app, name.to_string()) }>{*name}</button>
                                 <span class="dim">{*desc}</span>
                             </li>
                         }
@@ -242,7 +275,7 @@ fn Folder() -> impl IntoView {
     let tabs = [
         (Tab::Load, "t-load", "Load", "The file as loaded"),
         (Tab::Document, "t-doc", "Document", "The document's objects, maps and text"),
-        (Tab::Save, "t-save", "Save", "What next::Automerge::save() writes for this document: the change set format"),
+        (Tab::Save, "t-save", "Save", "What next::Automerge::save() writes for this document: the bundle format"),
     ];
     let color = move || tabs.iter().find(|t| t.0 == app.tab.get()).map_or("", |t| t.1);
     let stats = move || match app.tab.get() {
@@ -286,11 +319,37 @@ fn App() -> impl IntoView {
     let app = AppState::new();
     provide_context(app);
     let dragging = RwSignal::new(false);
-    if let Ok(hash) = window().location().hash() {
-        if patchwork::doc_id(&hash).is_some() {
-            open_link(app, hash);
-        }
+    if let Some((source, params)) = url::location_source() {
+        app.pending.set_value(Some((source.clone(), params)));
+        open_source(app, source);
     }
+    url::sync(app);
+    Effect::new(move |_| {
+        if app.file.with(|f| f.is_none()) {
+            return;
+        }
+        let Some((wanted, params)) = app.pending.get_value() else { return };
+        app.pending.set_value(None);
+        if app.source.get_untracked() == Some(wanted) {
+            url::apply(app, &params);
+        }
+    });
+    let _ = window_event_listener(leptos::ev::popstate, move |_| {
+        app.navigating.set_value(true);
+        match url::location_source() {
+            None => {
+                app.pending.set_value(None);
+                app.status.set(None);
+                app.close();
+            }
+            Some((source, params)) if app.source.get_untracked().as_ref() == Some(&source) => url::apply(app, &params),
+            Some((source, params)) => {
+                app.pending.set_value(Some((source.clone(), params)));
+                open_source(app, source);
+            }
+        }
+        set_timeout(move || app.navigating.set_value(false), std::time::Duration::ZERO);
+    });
     let on_drop = move |ev: leptos::ev::DragEvent| {
         ev.prevent_default();
         dragging.set(false);
