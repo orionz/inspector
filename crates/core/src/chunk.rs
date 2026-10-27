@@ -332,11 +332,25 @@ impl FileReport {
     }
 
     /// For each change stored in a chunk other than a change chunk, the
-    /// first such chunk. Runs automerge over every one of those chunks.
+    /// first such chunk. Runs automerge over every one of those chunks, and
+    /// over the whole file when it holds a v0 bundle.
     pub fn holders(&self, bytes: &[u8]) -> HashMap<String, usize> {
         let mut inside: HashMap<String, usize> = HashMap::new();
-        for c in self.chunks.iter().filter(|c| !is_change(c) && c.error.is_none()) {
-            for change in crate::doc::chunk_changes(bytes, c).unwrap_or_default() {
+        // A v0 bundle's changes only decode once their dependencies are loaded,
+        // and subduction fragments depend on the fragments before them.
+        let mut so_far = self.chunks.iter().any(|c| c.kind == ChunkKind::BundleV0).then(automerge::Automerge::new);
+        for c in self.chunks.iter().filter(|c| c.error.is_none()) {
+            let before = so_far.as_mut().map(|doc| {
+                let heads = doc.get_heads();
+                let _ = doc.load_incremental(&bytes[c.range.clone()]);
+                heads
+            });
+            let changes = match (&so_far, before) {
+                _ if is_change(c) => continue,
+                (Some(doc), Some(before)) if c.kind == ChunkKind::BundleV0 => doc.get_changes(&before),
+                _ => crate::doc::chunk_changes(bytes, c).unwrap_or_default(),
+            };
+            for change in changes {
                 inside.entry(change.hash().to_string()).or_insert(c.index);
             }
         }
